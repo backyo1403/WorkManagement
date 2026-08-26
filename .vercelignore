@@ -1,0 +1,17 @@
+# Bach Office deploys as a static site: everything it needs lives in public/.
+# The Next.js/Prisma port in src/ is a separate, unfinished target that cannot
+# run on serverless as written (it expects a local SQLite file), and leaving it
+# in the upload is what made Vercel try to build it instead of serving the app.
+src
+prisma
+node_modules
+.next
+package.json
+package-lock.json
+next.config.mjs
+postcss.config.js
+tsconfig.json
+next-env.d.ts
+tsconfig.tsbuildinfo
+.claude
+README.md

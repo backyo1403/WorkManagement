@@ -17,14 +17,9 @@
 .env*.local
 !.env.example
 
-# Local preview copies of the standalone app.
-# bach-office.html has to be served over HTTP for Tobby's .glb to load, so a
-# copy gets dropped in public/ to serve it during development. It is a straight
-# duplicate of the file at the repo root — tracking both is how the two quietly
-# drift apart. The GLB under public/assets IS tracked: that is the path a
-# deployed Next.js build serves it from.
-/public/bach-office.html
-/public/tobby-css-demo.html
+# NOTE: public/ is the deployed site and IS tracked. Bach Office lives at
+# public/index.html with its model at public/assets/tobby/ — one copy, the same
+# files locally and in production, so the two can never drift apart.
 
 # misc
 .DS_Store
