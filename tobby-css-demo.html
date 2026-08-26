@@ -1,0 +1,1044 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tobby CSS — bản demo</title>
+<style>
+/* =========================================================
+   TOBBY — CSS CHARACTER
+   Rebuilt from tobby_sprite_pack(1): an apricot toy poodle with a curly
+   scalloped silhouette, floppy curl ears, big dark eyes with a glint, a dark
+   button nose and a blue collar with a gold tag.
+
+   Everything is driven by custom properties, so ONE block of markup renders
+   any stage / emotion / pose — the same three axes the app already stores on
+   Tobby (evolutionStage, emotion, pose).
+
+   Sizes are in `em` against `.tb2{font-size:var(--px)}`, so the whole
+   character scales from one number and nothing has to be re-tuned per size.
+   ========================================================= */
+.tb2{
+  --fur:#D57A36;      /* sampled off the sheet: #D57A36 is 11% of all fur px */
+  --furHi:#EDA25C;
+  --furLo:#A8541C;
+  --furDeep:#8A4315;
+  --line:#5E2E0E;
+  --eye:#150C06;
+  --nose:#3A2218;
+  --collar:#2E7BC4;
+  --collarLo:#1D5E9E;
+  --tag:#F2C230;
+  --tagLo:#C9911A;
+  --tongue:#E8737F;
+
+  /* stage knobs — overridden per stage below */
+  --px:2px;           /* master scale */
+  --grow:1;           /* overall body size at this stage */
+  --head:1;           /* head size relative to body */
+  --bodyW:1;          /* body width */
+  --bodyH:1;          /* body depth */
+  --legH:1;           /* leg length */
+  --ear:1;            /* ear length */
+  --eyeR:1;           /* eye size relative to head */
+  --muzzle:1;         /* muzzle projection */
+  --tail:1;           /* tail puff */
+  --topknot:0;        /* the groomed crown curl only appears when grown */
+  --ruff:0;           /* chest ruff, likewise */
+  --neck:0em;         /* how far the head sinks into the shoulders */
+
+  font-size:var(--px);
+  position:relative; width:100em; height:100em;
+  /* Never let a flex parent squeeze him. Every part is positioned against this
+     box, so a shrunk box does not scale the dog — it slides his head off the
+     side of his own body. */
+  flex:0 0 auto;
+}
+/* The scaling wrapper. Stage size lives here and NOT on `.tb2` so the demo can
+   ask for one pixel size and still get five differently sized animals. */
+.tb2-in{
+  position:absolute; left:50%; bottom:0; width:100em; height:100em;
+  transform:translateX(-50%) scale(var(--grow)); transform-origin:50% 100%;
+  /* One outline around the union of every part. Four zero-blur drop-shadows
+     trace the composite silhouette — curls, ears, legs and tail included —
+     which a border on each piece could never do. */
+  filter:
+    drop-shadow(2em 0 0 var(--line)) drop-shadow(-2em 0 0 var(--line))
+    drop-shadow(0 2em 0 var(--line)) drop-shadow(0 -2em 0 var(--line));
+}
+
+/* ---------- evolution ----------
+   Growing up is not longer legs. Between tiny and adult the head shrinks
+   against the body, the eyes shrink against the head, the muzzle comes
+   forward, the ears drop, the chest deepens, the tail turns from a stub into
+   a plume, and the groomed crown and ruff appear. Every one of those is a
+   separate number, so each stage is a different ANIMAL, not a stretched one. */
+.tb2[data-stage="tiny"]{
+  --grow:.62; --head:1.15; --bodyW:.82; --bodyH:.70; --legH:.30; --ear:.62;
+  --eyeR:1.28; --muzzle:.60; --tail:.50; --topknot:0; --ruff:0; --neck:0em;
+  --fur:#E39355; --furHi:#F7B87A; --furLo:#BC6428;   /* puppy coat is paler */
+}
+.tb2[data-stage="puppy"]{
+  --grow:.74; --head:1.10; --bodyW:.90; --bodyH:.82; --legH:.48; --ear:.78;
+  --eyeR:1.17; --muzzle:.74; --tail:.68; --topknot:0; --ruff:0; --neck:0em;
+  --fur:#DE8949; --furHi:#F2AC6C; --furLo:#B25C22;
+}
+.tb2[data-stage="young"]{
+  --grow:.85; --head:1.04; --bodyW:.98; --bodyH:.94; --legH:.66; --ear:.96;
+  --eyeR:1.06; --muzzle:.88; --tail:.86; --topknot:.6; --ruff:.4; --neck:0em;
+}
+.tb2[data-stage="teen"]{
+  --grow:.93; --head:.98; --bodyW:1.06; --bodyH:1.04; --legH:.86; --ear:1.09;
+  --eyeR:.99; --muzzle:.98; --tail:.96; --topknot:.85; --ruff:.7; --neck:0em;
+}
+.tb2[data-stage="adult"]{
+  --grow:1; --head:.92; --bodyW:1.14; --bodyH:1.16; --legH:1; --ear:1.20;
+  --eyeR:.92; --muzzle:1.08; --tail:1.1; --topknot:1; --ruff:1; --neck:0em;
+  --fur:#CE7231; --furHi:#E79A56; --furLo:#9C4C18;  /* the coat deepens */
+}
+
+/* ---------- ground shadow ---------- */
+.tb2-shadow{
+  position:absolute; left:50%; bottom:0em; transform:translateX(-50%);
+  width:calc(56em * var(--bodyW)); height:7em; border-radius:50%;
+  background:rgba(60,30,10,.20); filter:blur(2em); z-index:0;
+}
+
+/* ---------- the curl ring ----------
+   The scalloped edge IS the poodle. A smooth oval reads as a bear cub, so the
+   silhouette carries a ring of small circles on its perimeter — fourteen round
+   the head, twelve round the body — drawn as box-shadows on one node so the
+   whole ring is a single thing to scale and animate.
+
+   The node needs a real 1em box: `border-radius:50%` on a zero-size element
+   rounds nothing, and every shadow spreads into a SQUARE. At 1em the radius is
+   half the side, so spread keeps it exactly circular. */
+.tb2-curls{
+  position:absolute; left:50%; top:50%; width:1em; height:1em;
+  margin:-.5em 0 0 -.5em; border-radius:50%; z-index:-1;
+}
+/* Deliberately IRREGULAR. Curls spaced at an even 25.7° with one shared radius
+   read as a cog, not as fur — the eye picks up the repeat instantly. Every
+   bump here carries its own angle, its own distance from centre and its own
+   size, so no two neighbours match and the rim breaks up the way real curls
+   do. The colours are shuffled too, not split cleanly top-and-bottom. */
+.tb2-head .tb2-curls{
+  /* 1.07 keeps the ring on the rim of the enlarged skull without re-deriving
+     fourteen hand-jittered coordinates. */
+  transform:scale(calc(var(--head) * 1.07));
+  box-shadow:
+     30.98em   0.94em 0 5.4em var(--fur),   25.58em  10.17em 0 4.2em var(--fur),
+     18.05em  21.56em 0 6.0em var(--furLo),  6.77em  24.26em 0 4.6em var(--fur),
+     -7.50em  26.20em 0 5.6em var(--fur),  -17.45em  19.97em 0 4.0em var(--furLo),
+    -27.41em  10.98em 0 5.8em var(--fur),  -30.98em  -0.91em 0 4.8em var(--fur),
+    -26.07em -11.40em 0 5.2em var(--furHi),-19.09em -21.28em 0 6.2em var(--fur),
+     -7.25em -24.15em 0 4.4em var(--furHi),  5.72em -26.50em 0 5.6em var(--furHi),
+     17.45em -19.97em 0 4.2em var(--fur),   27.62em -12.26em 0 6.0em var(--furHi);
+}
+.tb2-body .tb2-curls{
+  transform:scale(var(--bodyW), var(--bodyH));
+  box-shadow:
+     25.90em   2.00em 0 4.8em var(--fur),   20.13em  11.44em 0 3.8em var(--fur),
+     13.78em  19.50em 0 5.2em var(--furLo),  0.84em  21.99em 0 4.2em var(--fur),
+    -11.80em  19.60em 0 5.0em var(--fur),  -20.48em  12.05em 0 4.0em var(--furLo),
+    -25.94em   1.60em 0 5.4em var(--fur),  -21.19em  -9.86em 0 4.0em var(--fur),
+    -14.54em -19.07em 0 5.0em var(--furHi), -0.87em -21.99em 0 4.4em var(--fur),
+     11.80em -19.60em 0 5.2em var(--furHi), 20.35em -11.13em 0 3.9em var(--furHi);
+}
+/* A second, looser scatter ACROSS the coat rather than around its rim. The
+   silhouette alone leaves the middle of him flat and airbrushed; these are the
+   clumps that make the fur read as fur all the way in. */
+.tb2-head::after, .tb2-body::after{
+  content:''; position:absolute; inset:0; border-radius:inherit;
+  /* Soft-edged and small. Hard-edged stops at this size turned the coat into
+     polka dots — the clumps have to be felt, not counted. */
+  background:
+    radial-gradient(ellipse at 30% 26%, rgba(255,224,188,.13), transparent 70%),
+    radial-gradient(ellipse at 66% 20%, rgba(255,224,188,.09), transparent 68%),
+    radial-gradient(ellipse at 16% 58%, rgba(120,58,16,.07),  transparent 72%),
+    radial-gradient(ellipse at 84% 50%, rgba(120,58,16,.08),  transparent 70%);
+  background-size:64% 58%, 52% 46%, 58% 52%, 60% 54%;
+  background-repeat:no-repeat;
+  background-position:2% 2%, 56% 0%, 0% 42%, 62% 32%;
+  pointer-events:none;
+}
+
+/* ---------- body ----------
+   Anchored to the floor so every stage stands on the same line, with the head
+   hung off the top of it. Measured off the sheet: sitting, the chest is about
+   as wide as the skull and a little under half the total height. */
+.tb2-body{
+  position:absolute; left:50%; bottom:2em; transform:translateX(-50%);
+  width:calc(52em * var(--bodyW)); height:calc(46em * var(--bodyH));
+  border-radius:46% 46% 42% 42%;
+  background:radial-gradient(circle at 36% 22%, var(--furHi) 0%, var(--fur) 50%, var(--furLo) 96%);
+  z-index:2;
+  transform-origin:50% 100%;
+  animation:tbBreathe 3.4s ease-in-out infinite;
+}
+/* The chest ruff: a paler curl bib that only grows in from `young` onward. */
+.tb2-ruff{
+  position:absolute; left:50%; top:34%; transform:translateX(-50%);
+  width:calc(24em * var(--bodyW)); height:calc(22em * var(--bodyH)); border-radius:50%;
+  background:radial-gradient(circle at 50% 28%, rgba(255,228,196,.62), rgba(255,214,175,.16) 62%, transparent 80%);
+  opacity:var(--ruff); z-index:3;
+}
+
+/* ---------- legs ----------
+   Two front paws under the chest and two back paws splayed at the sides — what
+   the sheet actually shows sitting. They carry their own dark outline: the
+   silhouette filter only traces the OUTER edge, so without this the paws would
+   dissolve into the chest they overlap. */
+/* A leg is two different materials and the old one was drawing them as one
+   outlined stick, which is what made it look stuck on. The upper is FUR — no
+   outline, scalloped, and it runs up under the chest so there is no seam where
+   they join. The paw below is a distinct, firmer shape with toes. */
+.tb2-leg{
+  position:absolute; bottom:0em; width:16em;
+  height:calc(11em + 15em * var(--legH));
+  border-radius:9em 9em 46% 46%;
+  background:
+    radial-gradient(circle at 22% 26%, rgba(255,220,180,.28) 0 20%, transparent 21%),
+    linear-gradient(172deg, var(--fur) 10%, var(--furLo) 88%);
+  transform-origin:50% 4%;
+}
+/* Scalloped ankle fluff, so the leg does not end in a machined edge. */
+.tb2-leg::before{
+  content:''; position:absolute; left:50%; bottom:calc(6em + 2em * var(--legH));
+  width:1em; height:1em; margin-left:-.5em; border-radius:50%;
+  box-shadow:
+    -6.2em 0 0 3.4em var(--fur),  -2.0em 1.4em 0 3.8em var(--fur),
+     2.4em -0.6em 0 3.2em var(--furLo), 6.0em 1.0em 0 3.6em var(--fur);
+}
+/* The paw. Lighter and rounder than the leg, with three toe grooves — the one
+   detail that separates a dog's foot from the end of a tube. */
+.tb2-leg i{
+  position:absolute; left:50%; bottom:0; transform:translateX(-50%);
+  width:17em; height:11em; border-radius:46% 46% 50% 50%;
+  background:linear-gradient(180deg, var(--furHi) 0%, #C97B3E 46%, var(--furLo) 100%);
+  border:1.3em solid var(--line); border-top:0;
+  box-shadow:inset 0 1.6em 2em rgba(120,58,16,.30);
+}
+.tb2-leg i::after{                    /* toe grooves */
+  content:''; position:absolute; left:50%; top:14%; margin-left:-.7em;
+  width:1.4em; height:56%; border-radius:1em;
+  background:rgba(94,46,14,.42);
+  box-shadow:4.6em 0 0 rgba(94,46,14,.42), -4.6em 0 0 rgba(94,46,14,.42);
+}
+.tb2-leg.fl{ left:calc(50% - 18em); z-index:4; }
+.tb2-leg.fr{ left:calc(50% + 2em);  z-index:4; }
+/* Sitting, the back legs are folded HAUNCHES, not feet. Drawing a paw on them
+   put four in a row across the floor, which read as a caterpillar rather than a
+   dog — the sheet shows two front paws and two curls of hip at the sides. The
+   foot only comes back out when he is on his feet. */
+.tb2-leg.bl,.tb2-leg.br{
+  width:22em; z-index:1; height:calc(13em + 6em * var(--legH));
+  border-radius:50% 50% 44% 44%;
+}
+.tb2-leg.bl i,.tb2-leg.br i{ display:none; }
+.tb2[data-pose="walk"] .tb2-leg.bl i, .tb2[data-pose="walk"] .tb2-leg.br i,
+.tb2[data-pose="run"]  .tb2-leg.bl i, .tb2[data-pose="run"]  .tb2-leg.br i{
+  display:block; width:20em; height:11em;
+}
+/* Lifted 2em: rotating a box about its centre swings the low corner below the
+   floor line, and a haunch sunk into the ground reads as a bug. */
+.tb2-leg.bl{ left:calc(50% - 30em * var(--bodyW)); bottom:2em; transform:rotate(-11deg); }
+.tb2-leg.br{ left:calc(50% + 9em * var(--bodyW));  bottom:2em; transform:rotate(11deg); }
+
+/* ---------- tail ----------
+   A stub with one puff when small; a second, larger puff joins it as he grows,
+   which is how a poodle's plume actually fills out. */
+.tb2-tail{
+  position:absolute; left:calc(50% + 21em * var(--bodyW));
+  bottom:calc(4em + 22em * var(--bodyH));
+  width:12em; height:12em; z-index:0;
+  transform-origin:0% 100%;
+  animation:tbWag 1.5s ease-in-out infinite;
+}
+.tb2-tail i{
+  position:absolute; left:0; bottom:0; border-radius:50%;
+  width:calc(10em * var(--tail)); height:calc(10em * var(--tail));
+  background:radial-gradient(circle at 34% 28%, var(--furHi), var(--fur) 58%, var(--furLo));
+}
+.tb2-tail i:nth-child(2){
+  left:calc(5em * var(--tail)); bottom:calc(6em * var(--tail));
+  width:calc(8.5em * var(--tail)); height:calc(8.5em * var(--tail));
+  opacity:var(--tail);
+}
+
+/* ---------- head ----------
+   The big one. On the sheet the skull is 58% of the whole animal's height and
+   wider than the chest — that oversized round head is most of what makes him
+   read as a toy poodle rather than a generic dog. */
+/* The 12em inset is headroom for the crown curls and the topknot, which stand
+   proud of the skull — without it the ring is sheared flat against the top of
+   the box. */
+.tb2-head{
+  position:absolute; left:50%; top:calc(12em + var(--neck)); transform:translateX(-50%);
+  /* 68x60 rather than 64x56: the face has to carry fifteen readable emotions at
+     dock size, and every feature on it is a fraction of this box. Four extra em
+     on the skull is what makes the difference between "he looks worried" and a
+     smudge. */
+  width:calc(68em * var(--head)); height:calc(60em * var(--head));
+  border-radius:50%;
+  background:radial-gradient(circle at 36% 22%, var(--furHi) 0%, var(--fur) 50%, var(--furLo) 96%);
+  z-index:5;
+  transform-origin:50% 92%;
+  animation:tbBob 3.4s ease-in-out infinite;
+}
+/* The groomed crown curl. Absent on the puppies — they have not got it yet. */
+.tb2-top{
+  position:absolute; left:50%; top:calc(-8em * var(--head));
+  transform:translateX(-50%) scale(var(--topknot));
+  width:calc(26em * var(--head)); height:calc(19em * var(--head));
+  border-radius:50% 50% 40% 40%;
+  background:radial-gradient(circle at 44% 32%, var(--furHi), var(--fur) 72%);
+  opacity:var(--topknot); z-index:-1;
+}
+/* ---------- ears ----------
+   Curl lobes hung from the top of the skull, so lengthening them swings the
+   mass DOWN past the jaw rather than merely making them taller. They sit in
+   front of the skull at the sides, the way the sheet draws them. */
+/* Attached, not stuck on. Two things were making them read as separate blocks:
+   a closed dark border that traced a seam exactly where ear meets skull, and a
+   root that started at the skull's edge so there was nothing holding them on.
+
+   Now the ear is tucked BEHIND the head (z-index -1) and rooted deep inside it,
+   so the skull covers its top and only the part that hangs free is visible —
+   which is how a real drop ear works. The dark line is gone; the union
+   drop-shadow already outlines the part that shows, and that outline runs
+   continuously from head into ear because they are one silhouette. */
+.tb2-ear{
+  /* Stops at the jaw. Hung any longer they drape over the chest and the whole
+     animal fuses into one blob with no neck and no shoulders. */
+  position:absolute; top:calc(13em * var(--head));
+  width:calc(17em * var(--head));
+  height:calc((28em + 14em * var(--ear)) * var(--head));
+  border-radius:46% 46% 44% 44%;
+  background:
+    radial-gradient(circle at 40% 84%, rgba(120,58,16,.22) 0 26%, transparent 27%),
+    radial-gradient(circle at 62% 58%, rgba(255,214,175,.20) 0 22%, transparent 23%),
+    linear-gradient(168deg, var(--fur) 0%, var(--furLo) 58%, var(--furDeep) 100%);
+  z-index:-1;
+  transform-origin:50% 6%;
+}
+/* The curl at the tip: a drop ear is heaviest and curliest at the bottom. */
+.tb2-ear::after{
+  content:''; position:absolute; left:50%; bottom:calc(-2em * var(--head));
+  transform:translateX(-50%);
+  width:calc(15em * var(--head)); height:calc(13em * var(--head));
+  border-radius:50%;
+  background:radial-gradient(circle at 40% 30%, var(--furLo), var(--furDeep) 78%);
+}
+.tb2-ear.l{ left:calc(-2em * var(--head)); animation:tbEarL 4.7s ease-in-out infinite; }
+.tb2-ear.r{ right:calc(-2em * var(--head)); animation:tbEarR 5.3s ease-in-out infinite; }
+
+/* ---------- face ---------- */
+.tb2-face{ position:absolute; inset:0; }
+/* The face sits LOW on the skull. On the sheet the eyes start halfway down and
+   everything above them is forehead curls — get that wrong and he reads as a
+   teddy bear, which is exactly what a centred face produced. */
+.tb2-eye{
+  position:absolute; top:calc(47% - 2% * var(--eyeR));
+  width:calc(12em * var(--eyeR) * var(--head));
+  height:calc(13em * var(--eyeR) * var(--head));
+  border-radius:50%; background:var(--eye);
+  transition:height .12s ease, transform .18s ease, border-radius .18s ease;
+}
+.tb2-eye.l{ left:23%; }
+.tb2-eye.r{ right:23%; }
+.tb2-eye i{                              /* glint */
+  position:absolute; left:22%; top:16%;
+  width:34%; height:30%; border-radius:50%; background:#fff; opacity:.95;
+}
+.tb2-eye::after{                         /* lower catchlight */
+  content:''; position:absolute; right:20%; bottom:18%;
+  width:18%; height:16%; border-radius:50%; background:rgba(255,255,255,.55);
+}
+/* Muzzle: a paler pad that grows forward with age. */
+.tb2-muzzle{
+  position:absolute; left:50%; top:calc(66% - 4% * var(--muzzle));
+  transform:translateX(-50%);
+  width:calc(28em * var(--muzzle) * var(--head));
+  height:calc(20em * var(--muzzle) * var(--head));
+  border-radius:50%;
+  background:radial-gradient(circle at 50% 36%, rgba(255,232,203,.55), rgba(255,214,175,0) 74%);
+}
+.tb2-nose{
+  position:absolute; left:50%; top:70%; transform:translateX(-50%);
+  width:calc(11em * var(--head)); height:calc(9em * var(--head));
+  border-radius:44% 44% 56% 56%;
+  background:radial-gradient(circle at 36% 26%, #7A5344, var(--nose) 58%);
+}
+.tb2-mouth{
+  position:absolute; left:50%; top:82%; transform:translateX(-50%);
+  width:calc(13em * var(--head)); height:calc(6em * var(--head));
+  border-bottom:calc(1.8em * var(--head)) solid var(--nose);
+  border-radius:0 0 60% 60%;
+  transition:all .18s ease;
+}
+.tb2-tongue{
+  position:absolute; left:50%; top:86%; transform:translateX(-50%) scaleY(0);
+  width:calc(11em * var(--head)); height:calc(9em * var(--head));
+  border-radius:0 0 60% 60%; background:var(--tongue);
+  border:1.2em solid var(--line); border-top:0;
+  transform-origin:50% 0; transition:transform .18s ease;
+}
+.tb2-cheek{
+  position:absolute; top:70%; width:calc(11em * var(--head)); height:calc(6em * var(--head));
+  border-radius:50%; background:rgba(232,110,80,.30); opacity:0; transition:opacity .2s ease;
+}
+.tb2-cheek.l{ left:6%; } .tb2-cheek.r{ right:6%; }
+
+/* ---------- collar ---------- */
+/* Sits on the seam where the head meets the chest — the one place a collar can
+   go without looking like a belt or a necklace. */
+/* Sits at the top of the chest, BEHIND the head — the skull overlaps the neck,
+   so a collar drawn in front of it lands across his chin. */
+.tb2-collar{
+  position:absolute; left:50%; transform:translateX(-50%);
+  /* Derived from where the JAW actually ends, not from the chest. The skull
+     overlaps the neck by a different amount at every stage, so a collar placed
+     off the body's own height disappears under the chin on the puppies. */
+  bottom:calc(81em - var(--neck) - 60em * var(--head));
+  width:calc(34em * var(--bodyW)); height:calc(9em * var(--bodyW));
+  border-radius:40% 40% 52% 52%;
+  background:linear-gradient(180deg, var(--collar) 30%, var(--collarLo));
+  border:1.3em solid var(--line);
+  z-index:3;
+}
+.tb2-collar i{
+  position:absolute; left:50%; top:78%; transform:translateX(-50%);
+  width:calc(11em * var(--bodyW)); height:calc(11em * var(--bodyW));
+  border-radius:50%;
+  background:radial-gradient(circle at 36% 30%, #FFE79A, var(--tag) 52%, var(--tagLo));
+  border:1.2em solid var(--line);
+}
+
+/* =========================================================
+   EMOTIONS — the same fifteen the dialogue engine already emits.
+   Each one is eyes + mouth + posture, never a colour wash.
+   ========================================================= */
+.tb2[data-emotion="happy"] .tb2-eye,
+.tb2[data-emotion="celebrating"] .tb2-eye,
+.tb2[data-emotion="proud"] .tb2-eye{
+  height:calc(4em * var(--eyeR) * var(--head));
+  border-radius:60% 60% 10% 10%/100% 100% 10% 10%;
+}
+.tb2[data-emotion="happy"] .tb2-eye i,
+.tb2[data-emotion="celebrating"] .tb2-eye i,
+.tb2[data-emotion="proud"] .tb2-eye i,
+.tb2[data-emotion="sleepy"] .tb2-eye i{ opacity:0; }
+
+.tb2[data-emotion="happy"] .tb2-mouth,
+.tb2[data-emotion="celebrating"] .tb2-mouth,
+.tb2[data-emotion="surprised"] .tb2-mouth{
+  height:calc(9em * var(--head)); border-radius:0 0 70% 70%;
+  background:var(--nose); border-bottom:0;
+}
+.tb2[data-emotion="happy"] .tb2-tongue,
+.tb2[data-emotion="celebrating"] .tb2-tongue{ transform:translateX(-50%) scaleY(1); }
+.tb2[data-emotion="happy"] .tb2-cheek,
+.tb2[data-emotion="celebrating"] .tb2-cheek,
+.tb2[data-emotion="proud"] .tb2-cheek{ opacity:1; }
+
+.tb2[data-emotion="excited"] .tb2-eye{ transform:scale(1.16); }
+.tb2[data-emotion="curious"] .tb2-eye,
+.tb2[data-emotion="surprised"] .tb2-eye{ transform:scale(1.12); }
+.tb2[data-emotion="focused"] .tb2-eye,
+.tb2[data-emotion="working"] .tb2-eye{ height:calc(6em * var(--eyeR) * var(--head)); }
+.tb2[data-emotion="sleepy"] .tb2-eye{ height:calc(1.8em * var(--head)); border-radius:2em; }
+.tb2[data-emotion="sleepy"] .tb2-eye::after{ opacity:0; }
+
+.tb2[data-emotion="sad"] .tb2-eye.l{ transform:translateY(1em) rotate(-13deg); }
+.tb2[data-emotion="sad"] .tb2-eye.r{ transform:translateY(1em) rotate(13deg); }
+.tb2[data-emotion="sad"] .tb2-mouth,
+.tb2[data-emotion="worried"] .tb2-mouth{
+  border-radius:60% 60% 0 0; border-bottom:0;
+  border-top:calc(1.6em * var(--head)) solid var(--nose);
+}
+.tb2[data-emotion="angry"] .tb2-eye{ height:calc(6em * var(--eyeR) * var(--head)); }
+.tb2[data-emotion="angry"] .tb2-mouth{ border-radius:0; height:0; }
+
+.tb2[data-emotion="thinking"] .tb2-eye,
+.tb2[data-emotion="confused"] .tb2-eye{ transform:translateX(1.6em); }
+.tb2[data-emotion="thinking"] .tb2-mouth,
+.tb2[data-emotion="confused"] .tb2-mouth{ width:calc(7em * var(--head)); border-radius:0; }
+
+/* Brows: only drawn when an emotion needs them, so a calm face stays clean. */
+.tb2-brow{
+  position:absolute; top:40%; width:calc(10em * var(--head)); height:calc(2.4em * var(--head));
+  border-radius:2em; background:var(--furDeep); opacity:0; transition:all .2s ease;
+}
+.tb2-brow.l{ left:20%; } .tb2-brow.r{ right:20%; }
+.tb2[data-emotion="angry"] .tb2-brow{ opacity:.9; }
+.tb2[data-emotion="angry"] .tb2-brow.l{ transform:rotate(20deg); }
+.tb2[data-emotion="angry"] .tb2-brow.r{ transform:rotate(-20deg); }
+.tb2[data-emotion="worried"] .tb2-brow{ opacity:.75; }
+.tb2[data-emotion="worried"] .tb2-brow.l{ transform:rotate(-16deg); }
+.tb2[data-emotion="worried"] .tb2-brow.r{ transform:rotate(16deg); }
+
+/* Ears follow the mood — flat back when worried, perked when curious. */
+.tb2[data-emotion="worried"] .tb2-ear,
+.tb2[data-emotion="sad"] .tb2-ear{ animation:none; }
+.tb2[data-emotion="worried"] .tb2-ear.l,
+.tb2[data-emotion="sad"] .tb2-ear.l{ transform:rotate(16deg); }
+.tb2[data-emotion="worried"] .tb2-ear.r,
+.tb2[data-emotion="sad"] .tb2-ear.r{ transform:rotate(-16deg); }
+.tb2[data-emotion="curious"] .tb2-ear.l,
+.tb2[data-emotion="excited"] .tb2-ear.l{ animation:none; transform:rotate(-14deg); }
+.tb2[data-emotion="curious"] .tb2-ear.r,
+.tb2[data-emotion="excited"] .tb2-ear.r{ animation:none; transform:rotate(14deg); }
+
+/* A curious dog tilts its head. It is the single cheapest signal of attention. */
+.tb2[data-emotion="curious"] .tb2-head,
+.tb2[data-emotion="confused"] .tb2-head,
+.tb2[data-emotion="thinking"] .tb2-head{ animation:tbTilt 3.2s ease-in-out infinite; }
+.tb2[data-emotion="excited"] .tb2-head,
+.tb2[data-emotion="celebrating"] .tb2-head{ animation:tbBob .5s ease-in-out infinite; }
+.tb2[data-emotion="happy"] .tb2-tail,
+.tb2[data-emotion="excited"] .tb2-tail,
+.tb2[data-emotion="celebrating"] .tb2-tail{ animation-duration:.34s; }
+.tb2[data-emotion="sad"] .tb2-tail,
+.tb2[data-emotion="worried"] .tb2-tail{ animation:none; transform:rotate(26deg); }
+.tb2[data-emotion="sleepy"] .tb2-tail{ animation-duration:4s; }
+.tb2[data-emotion="sleepy"] .tb2-body,
+.tb2[data-emotion="sleepy"] .tb2-head{ animation-duration:5.5s; }
+
+/* =========================================================
+   POSES
+   ========================================================= */
+
+/* ---------- walking is a SEPARATE, PURPOSE-BUILT PROFILE ----------
+   The first attempt reused the front-facing parts and moved them about. It
+   cannot work, and every symptom followed from it: a muzzle drawn as a
+   front-view oval becomes a lump welded to the cheek once you slide it to the
+   edge; an ear shaped to sit flat against a face-on skull fits nothing when the
+   head turns; legs whose paws point AT the viewer read as feet on backwards;
+   and a collar drawn as a wide horizontal ellipse is a ring seen face-on, which
+   from the side must be a narrow band across the throat.
+
+   So this is a second body, built side-on from scratch. The front-view one is
+   hidden while it shows. Facing left is this same body mirrored, so there is
+   one construction to maintain and the two directions cannot drift apart.
+   ========================================================= */
+.tb2-side{ display:none; position:absolute; inset:0; }
+.tb2[data-pose="walk"] .tb2-front, .tb2[data-pose="run"] .tb2-front{ display:none; }
+.tb2[data-pose="walk"] .tb2-side,  .tb2[data-pose="run"] .tb2-side { display:block; }
+.tb2[data-facing="left"] .tb2-in{
+  transform:translateX(-50%) scale(var(--grow)) scaleX(-1);
+}
+
+/* --- torso: long, chest deeper at the front than the rump --- */
+.tb2-s-body{
+  position:absolute; left:4em; bottom:calc(2em + 20em * var(--legH));
+  width:calc(60em * var(--bodyW)); height:calc(34em * var(--bodyH));
+  border-radius:44% 52% 46% 42%;
+  background:radial-gradient(circle at 62% 24%, var(--furHi) 0%, var(--fur) 48%, var(--furLo) 96%);
+  z-index:2;
+  transform-origin:50% 100%;
+}
+.tb2-s-body .tb2-curls{ transform:scale(calc(var(--bodyW) * 1.18), calc(var(--bodyH) * .74)); }
+
+/* --- legs: seen edge-on ---
+   Narrow, and the paw runs FORWARD along the ground instead of presenting its
+   toes to the camera. One short groove at the front is all a side-on foot
+   shows of its toes. */
+.tb2-s-leg{
+  position:absolute; bottom:0; width:12em;
+  height:calc(12em + 16em * var(--legH));
+  border-radius:6em 6em 38% 38%;
+  background:linear-gradient(168deg, var(--fur) 12%, var(--furLo) 92%);
+  transform-origin:50% 6%;
+}
+.tb2-s-leg::after{                       /* side-on paw, toe pointing ahead */
+  content:''; position:absolute; bottom:0; left:-2em;
+  width:17em; height:8.5em;
+  border-radius:42% 62% 54% 40%;
+  background:linear-gradient(180deg, var(--furHi) 0%, #C97B3E 48%, var(--furLo) 100%);
+  border:1.3em solid var(--line); border-top:0;
+}
+.tb2-s-leg::before{                      /* single toe groove at the front */
+  content:''; position:absolute; bottom:1.5em; right:1.5em;
+  width:1.3em; height:4em; border-radius:1em; background:rgba(94,46,14,.40); z-index:1;
+}
+/* Hind legs carry a thigh: wider at the top, tucked under the rump. */
+.tb2-s-leg.bl,.tb2-s-leg.br{ width:15em; border-radius:48% 48% 34% 34%; }
+.tb2-s-leg.fl{ left:calc(48em * var(--bodyW)); z-index:4; }
+.tb2-s-leg.fr{ left:calc(56em * var(--bodyW)); z-index:1; filter:brightness(.80); }
+.tb2-s-leg.bl{ left:calc(8em  * var(--bodyW)); z-index:4; }
+.tb2-s-leg.br{ left:calc(16em * var(--bodyW)); z-index:1; filter:brightness(.80); }
+
+/* --- head: the muzzle is PART of the skull silhouette ---
+   It overlaps the head and shares its fur, so the union outline runs in one
+   unbroken line from forehead over the nose and back under the jaw. Drawn as a
+   detached shape at the edge it read as a growth on his cheek. */
+.tb2-s-head{
+  position:absolute; right:9em; top:9em;
+  width:calc(40em * var(--head)); height:calc(38em * var(--head));
+  border-radius:52% 50% 46% 54%;
+  background:radial-gradient(circle at 58% 26%, var(--furHi) 0%, var(--fur) 48%, var(--furLo) 96%);
+  z-index:5; transform-origin:40% 90%;
+}
+.tb2-s-head .tb2-curls{ transform:scale(calc(var(--head) * .64)); }
+.tb2-s-muzzle{
+  position:absolute; right:calc(-9em * var(--head)); top:44%;
+  width:calc(24em * var(--head)); height:calc(18em * var(--head));
+  border-radius:40% 56% 52% 44%;
+  background:linear-gradient(172deg, var(--fur) 10%, var(--furLo) 96%);
+  z-index:-1;                            /* tucked under the skull, not on it */
+}
+.tb2-s-muzzle::after{                    /* nose at the tip */
+  content:''; position:absolute; right:calc(-1em * var(--head)); top:14%;
+  width:calc(10em * var(--head)); height:calc(9em * var(--head));
+  border-radius:46% 54% 56% 44%;
+  background:radial-gradient(circle at 34% 26%, #7A5344, var(--nose) 58%);
+}
+.tb2-s-muzzle::before{                   /* mouth line under the nose */
+  content:''; position:absolute; right:calc(3em * var(--head)); top:58%;
+  width:calc(11em * var(--head)); height:calc(5em * var(--head));
+  border-bottom:calc(1.7em * var(--head)) solid var(--nose);
+  border-radius:0 0 70% 40%;
+}
+.tb2-s-eye{
+  position:absolute; right:calc(13em * var(--head)); top:34%;
+  width:calc(11em * var(--eyeR) * var(--head)); height:calc(12em * var(--eyeR) * var(--head));
+  border-radius:50%; background:var(--eye);
+}
+.tb2-s-eye i{
+  position:absolute; left:20%; top:16%; width:34%; height:30%;
+  border-radius:50%; background:#fff; opacity:.95;
+}
+/* Rear of the skull and BEHIND it, so the skull holds it on and it never lands
+   across the eye. */
+.tb2-s-ear{
+  position:absolute; left:calc(1em * var(--head)); top:calc(5em * var(--head));
+  width:calc(16em * var(--head));
+  height:calc((22em + 14em * var(--ear)) * var(--head));
+  border-radius:48% 48% 42% 42%;
+  background:linear-gradient(166deg, var(--fur) 0%, var(--furLo) 62%, var(--furDeep));
+  z-index:-1; transform-origin:50% 8%;
+  animation:tbEarFlop .52s ease-in-out infinite;
+}
+/* --- collar: a band ACROSS the throat, not a ring seen face-on --- */
+.tb2-s-collar{
+  position:absolute; right:calc(26em + 6em * var(--head));
+  bottom:calc(14em + 20em * var(--legH));
+  width:calc(11em * var(--bodyW)); height:calc(26em * var(--bodyH));
+  border-radius:46%;
+  background:linear-gradient(96deg, var(--collarLo), var(--collar) 46%, var(--collarLo));
+  border:1.3em solid var(--line);
+  transform:rotate(-13deg);
+  z-index:3;                             /* behind the head, over the chest */
+}
+.tb2-s-collar i{
+  position:absolute; left:50%; bottom:calc(-5em * var(--bodyW)); transform:translateX(-50%);
+  width:calc(10em * var(--bodyW)); height:calc(10em * var(--bodyW));
+  border-radius:50%;
+  background:radial-gradient(circle at 36% 30%, #FFE79A, var(--tag) 52%, var(--tagLo));
+  border:1.2em solid var(--line);
+}
+.tb2-s-tail{
+  position:absolute; left:1em; bottom:calc(12em + 20em * var(--legH));
+  width:14em; height:14em; z-index:0;
+  transform-origin:100% 100%;
+  animation:tbWag .5s ease-in-out infinite;
+}
+.tb2-s-tail i{
+  position:absolute; left:0; bottom:0; border-radius:50%;
+  width:calc(11em * var(--tail)); height:calc(11em * var(--tail));
+  background:radial-gradient(circle at 40% 30%, var(--furHi), var(--fur) 58%, var(--furLo));
+}
+.tb2-s-tail i:nth-child(2){
+  left:calc(4em * var(--tail)); bottom:calc(7em * var(--tail));
+  width:calc(9em * var(--tail)); height:calc(9em * var(--tail));
+}
+.tb2[data-pose="walk"] .tb2-shadow,.tb2[data-pose="run"] .tb2-shadow{
+  width:calc(80em * var(--bodyW));
+}
+@keyframes tbEarFlop{ 0%,100%{transform:rotate(-5deg);} 50%{transform:rotate(7deg);} }
+
+/* Diagonal pairs, the gait a real dog walks: near-fore with far-hind. */
+.tb2[data-pose="walk"] .tb2-s-leg.fl,
+.tb2[data-pose="walk"] .tb2-s-leg.br{ animation:tbStepA .52s ease-in-out infinite; }
+.tb2[data-pose="walk"] .tb2-s-leg.fr,
+.tb2[data-pose="walk"] .tb2-s-leg.bl{ animation:tbStepB .52s ease-in-out infinite; }
+.tb2[data-pose="walk"] .tb2-s-body,
+.tb2[data-pose="walk"] .tb2-s-head{ animation:tbTrotS .26s ease-in-out infinite; }
+
+.tb2[data-pose="run"] .tb2-s-leg.fl,
+.tb2[data-pose="run"] .tb2-s-leg.br{ animation:tbStepA .3s ease-in-out infinite; }
+.tb2[data-pose="run"] .tb2-s-leg.fr,
+.tb2[data-pose="run"] .tb2-s-leg.bl{ animation:tbStepB .3s ease-in-out infinite; }
+.tb2[data-pose="run"] .tb2-s-body,
+.tb2[data-pose="run"] .tb2-s-head{ animation:tbTrotS .15s ease-in-out infinite; }
+.tb2[data-pose="run"] .tb2-s-ear{ animation-duration:.3s; }
+/* No translateX(-50%) here: the profile parts are edge-anchored, so the sit
+   pose's bob keyframe would fling them half their width sideways. */
+@keyframes tbTrotS{ 0%,100%{transform:translateY(0);} 50%{transform:translateY(-1.2em);} }
+
+.tb2[data-pose="jump"]{ animation:tbHop .62s cubic-bezier(.3,.7,.4,1) infinite; }
+.tb2[data-pose="jump"] .tb2-leg{ transform:rotate(8deg); }
+
+/* Sleeping: he folds down rather than standing with his eyes shut. */
+.tb2[data-pose="sleep"]{ transform:translateY(7em); }
+.tb2[data-pose="sleep"] .tb2-head{ transform:translateX(-50%) rotate(-14deg) translateY(6em); animation:tbBob 5.5s ease-in-out infinite; }
+.tb2[data-pose="sleep"] .tb2-body{ animation:tbBreathe 5.5s ease-in-out infinite; }
+.tb2[data-pose="sleep"] .tb2-leg{ height:calc(5em + 4em * var(--legH)); }
+.tb2[data-pose="sleep"] .tb2-eye{ height:calc(1.6em * var(--head)); border-radius:2em; }
+.tb2[data-pose="sleep"] .tb2-eye i,
+.tb2[data-pose="sleep"] .tb2-eye::after{ opacity:0; }
+.tb2[data-pose="sleep"] .tb2-tail{ animation-duration:5s; }
+
+/* =========================================================
+   OVERLAYS — the sheet's own vocabulary: heart, Zzz, ?, !, sparkles.
+   ========================================================= */
+.tb2-fx{ position:absolute; inset:0; pointer-events:none; z-index:6; }
+/* The glyph size lives on ::before, never on the positioned box. Setting
+   `font-size` on the box itself re-bases its OWN `top`/`right` em values —
+   `top:-4em` on a 20em glyph resolves to twenty times what you meant, which
+   threw the "?" clean off the top of the character. */
+.tb2-fx > *{ position:absolute; opacity:0; }
+.tb2-fx > *::before{ display:block; font-weight:900; line-height:1; font-family:'Inter',system-ui,sans-serif; }
+.tb2-zzz{ right:-4em; top:2em; }
+.tb2-zzz::before{ content:'z'; font-size:14em; color:#7FB6E8; }
+.tb2[data-emotion="sleepy"] .tb2-zzz,
+.tb2[data-pose="sleep"] .tb2-zzz{ animation:tbFloat 2.6s ease-in-out infinite; }
+.tb2-quest{ right:-2em; top:-4em; }
+.tb2-quest::before{ content:'?'; font-size:20em; color:#3E8FD0; }
+.tb2[data-emotion="thinking"] .tb2-quest,
+.tb2[data-emotion="confused"] .tb2-quest,
+.tb2[data-emotion="curious"] .tb2-quest{ animation:tbPop 2.2s ease-in-out infinite; }
+.tb2-excl{ right:-1em; top:-5em; }
+.tb2-excl::before{ content:'!'; font-size:20em; color:#F0B429; }
+.tb2[data-emotion="surprised"] .tb2-excl,
+.tb2[data-emotion="worried"] .tb2-excl{ animation:tbPop 1.5s ease-in-out infinite; }
+.tb2-heart{
+  right:0em; top:-2em; width:12em; height:12em; background:#E8566E;
+  clip-path:path('M6 11 C-2 5 1 -1 6 3 C11 -1 14 5 6 11 Z');
+  transform:scale(1.6); transform-origin:50% 50%;
+}
+.tb2[data-emotion="proud"] .tb2-heart{ animation:tbFloat 2.4s ease-in-out infinite; }
+.tb2-spark{
+  left:-4em; top:6em; width:9em; height:9em;
+  background:
+    linear-gradient(#FFD75E,#FFD75E) center/2.4em 100% no-repeat,
+    linear-gradient(#FFD75E,#FFD75E) center/100% 2.4em no-repeat;
+}
+.tb2-spark.b{ left:auto; right:-3em; top:22em; width:6em; height:6em; }
+.tb2[data-emotion="excited"] .tb2-spark,
+.tb2[data-emotion="celebrating"] .tb2-spark{ animation:tbTwinkle 1.3s ease-in-out infinite; }
+.tb2-spark.b{ animation-delay:.45s !important; }
+
+/* =========================================================
+   COSMETICS — the seven the app already unlocks.
+   ========================================================= */
+.tb2-item{ position:absolute; display:none; z-index:7; }
+.tb2[data-wear~="glasses"] .tb2-glasses{ display:block; }
+.tb2[data-wear~="headphones"] .tb2-headphones{ display:block; }
+.tb2[data-wear~="scarf"] .tb2-scarf{ display:block; }
+.tb2[data-wear~="hat"] .tb2-hat{ display:block; }
+.tb2[data-wear~="backpack"] .tb2-backpack{ display:block; }
+.tb2[data-wear~="laptop"] .tb2-laptop{ display:block; }
+.tb2[data-wear~="collar"] .tb2-collar{ display:block; }
+
+.tb2-glasses{
+  /* All headwear is anchored off `12em + neck`, which is where the skull
+     actually starts. Leaving that term out — as these three did — parks the
+     item a full head-height above him, floating in mid-air. */
+  left:50%; top:calc(12em + var(--neck) + 24em * var(--head)); transform:translateX(-50%);
+  width:calc(46em * var(--head)); height:calc(14em * var(--head));
+}
+.tb2-glasses::before, .tb2-glasses::after{
+  content:''; position:absolute; top:0; width:calc(16em * var(--head)); height:calc(13em * var(--head));
+  border:calc(1.8em * var(--head)) solid #2C3542; border-radius:40%;
+  background:rgba(190,225,245,.28);
+}
+.tb2-glasses::before{ left:calc(2em * var(--head)); }
+.tb2-glasses::after{ right:calc(2em * var(--head)); }
+.tb2-glasses i{
+  position:absolute; left:50%; top:45%; transform:translateX(-50%);
+  width:calc(9em * var(--head)); height:calc(1.8em * var(--head)); background:#2C3542;
+}
+
+.tb2-headphones{
+  left:50%; top:calc(12em + var(--neck) - 3em * var(--head)); transform:translateX(-50%);
+  width:calc(64em * var(--head)); height:calc(36em * var(--head));
+}
+.tb2-headphones::before{
+  content:''; position:absolute; left:0; right:0; top:0; height:calc(30em * var(--head));
+  border:calc(3.4em * var(--head)) solid #2F3846; border-bottom:0;
+  border-radius:50% 50% 0 0 / 100% 100% 0 0;
+}
+.tb2-headphones i{
+  position:absolute; top:calc(15em * var(--head));
+  width:calc(11em * var(--head)); height:calc(16em * var(--head));
+  border-radius:3em; background:linear-gradient(180deg,#3C4757,#232B36);
+}
+.tb2-headphones i:first-child{ left:calc(-3em * var(--head)); }
+.tb2-headphones i:last-child{ right:calc(-3em * var(--head)); }
+
+/* The brim has to land ON the skull, not hover over it. Anchored so the brim
+   sits about a sixth of the way down the head — a hat resting on a curly head
+   sinks into the fur, it does not balance above it. */
+.tb2-hat{
+  left:50%; top:calc(12em + var(--neck) - 6em * var(--head)); transform:translateX(-50%);
+  width:calc(56em * var(--head)); height:calc(22em * var(--head));
+}
+.tb2-hat::before{                        /* brim */
+  content:''; position:absolute; left:0; right:0; bottom:0; height:calc(8em * var(--head));
+  border-radius:50%;
+  background:linear-gradient(180deg,#E8C77A,#C9A254);
+  box-shadow:inset 0 calc(-1.6em * var(--head)) 0 rgba(140,100,30,.35);
+}
+.tb2-hat::after{                         /* crown */
+  content:''; position:absolute; left:50%; bottom:calc(5em * var(--head)); transform:translateX(-50%);
+  width:calc(30em * var(--head)); height:calc(16em * var(--head));
+  border-radius:46% 46% 26% 26%; background:linear-gradient(180deg,#F0D48C,#D2AC5D);
+}
+
+.tb2-scarf{
+  left:50%; transform:translateX(-50%);
+  bottom:calc(79em - var(--neck) - 60em * var(--head));
+  width:calc(38em * var(--bodyW)); height:calc(12em * var(--bodyW));
+  border-radius:44%; background:linear-gradient(180deg,#E2564F,#B23A36);
+  z-index:6;
+}
+.tb2-scarf i{
+  position:absolute; left:calc(50% + 10em * var(--bodyW)); top:70%;
+  width:calc(9em * var(--bodyW)); height:calc(18em * var(--bodyW));
+  border-radius:2em 2em 40% 40%; background:linear-gradient(180deg,#CF4A44,#9C302C);
+  transform-origin:50% 0; animation:tbScarf 2.6s ease-in-out infinite;
+}
+
+.tb2-backpack{
+  left:calc(50% - 36em * var(--bodyW));
+  bottom:calc(3em + 14em * var(--bodyH));
+  width:calc(17em * var(--bodyW)); height:calc(22em * var(--bodyH));
+  border-radius:4em; background:linear-gradient(180deg,#4E8C5A,#2F5F3B); z-index:1;
+}
+.tb2-backpack::after{
+  content:''; position:absolute; left:12%; top:34%; width:76%; height:5em;
+  border-radius:2em; background:rgba(255,255,255,.28);
+}
+
+.tb2-laptop{
+  left:50%; transform:translateX(-50%); bottom:0;
+  width:calc(40em * var(--bodyW)); height:calc(20em);
+}
+.tb2-laptop::before{                     /* screen */
+  content:''; position:absolute; left:50%; bottom:5em; transform:translateX(-50%) perspective(60em) rotateX(-12deg);
+  width:calc(34em * var(--bodyW)); height:16em; border-radius:2em 2em 0 0;
+  background:linear-gradient(180deg,#5FA8DC,#2C6FA8);
+  box-shadow:inset 0 0 0 1.4em #2A3542, 0 0 14em rgba(95,168,220,.55);
+}
+.tb2-laptop::after{                       /* base */
+  content:''; position:absolute; left:50%; bottom:1em; transform:translateX(-50%);
+  width:calc(40em * var(--bodyW)); height:5em; border-radius:1.5em;
+  background:linear-gradient(180deg,#8899A8,#5A6773);
+}
+
+/* =========================================================
+   MOTION
+   ========================================================= */
+@keyframes tbBreathe{ 0%,100%{transform:translateX(-50%) scaleY(1);} 50%{transform:translateX(-50%) scaleY(1.035);} }
+@keyframes tbBob{ 0%,100%{transform:translateX(-50%) translateY(0);} 50%{transform:translateX(-50%) translateY(-1.4em);} }
+@keyframes tbTilt{
+  0%,58%,100%{transform:translateX(-50%) rotate(0);}
+  20%,44%{transform:translateX(-50%) rotate(-11deg);}
+}
+@keyframes tbWag{ 0%,100%{transform:rotate(-16deg);} 50%{transform:rotate(20deg);} }
+@keyframes tbEarL{ 0%,88%,100%{transform:rotate(0);} 93%{transform:rotate(-9deg);} }
+@keyframes tbEarR{ 0%,90%,100%{transform:rotate(0);} 95%{transform:rotate(9deg);} }
+@keyframes tbStepA{ 0%,100%{transform:rotate(-15deg);} 50%{transform:rotate(15deg);} }
+@keyframes tbStepB{ 0%,100%{transform:rotate(15deg);} 50%{transform:rotate(-15deg);} }
+@keyframes tbTrot{ 0%,100%{transform:translateX(-50%) translateY(0);} 50%{transform:translateX(-50%) translateY(-1.1em);} }
+@keyframes tbHop{ 0%,100%{transform:translateY(0);} 40%{transform:translateY(-12em);} 55%{transform:translateY(-9em);} }
+@keyframes tbScarf{ 0%,100%{transform:rotate(-8deg);} 50%{transform:rotate(10deg);} }
+@keyframes tbFloat{
+  0%{opacity:0; transform:translateY(2em) scale(.7);}
+  35%{opacity:1;} 100%{opacity:0; transform:translateY(-14em) scale(1.15);}
+}
+@keyframes tbPop{
+  0%,72%,100%{opacity:0; transform:scale(.5);}
+  12%,60%{opacity:1; transform:scale(1);}
+}
+@keyframes tbTwinkle{ 0%,100%{opacity:0; transform:scale(.4) rotate(0);} 50%{opacity:1; transform:scale(1) rotate(90deg);} }
+
+/* Blink is a lid dropping over the eye, not the eye vanishing. */
+.tb2-lid{
+  position:absolute; left:-6%; right:-6%; top:-10%; height:130%;
+  background:var(--fur); border-radius:50%;
+  transform:scaleY(0); transform-origin:50% 0;
+  animation:tbBlink 5.2s ease-in-out infinite;
+}
+@keyframes tbBlink{ 0%,95.5%,100%{transform:scaleY(0);} 97%,98.4%{transform:scaleY(1);} }
+.tb2[data-emotion="sleepy"] .tb2-lid,
+.tb2[data-pose="sleep"] .tb2-lid{ animation:none; transform:scaleY(0); }
+
+@media (prefers-reduced-motion: reduce){
+  .tb2 *, .tb2{ animation:none !important; }
+}
+
+/* =========================================================
+   DEMO PAGE CHROME (not part of the character)
+   ========================================================= */
+*{box-sizing:border-box;}
+body{
+  margin:0; padding:28px 22px 60px; font-family:'Inter',system-ui,-apple-system,sans-serif;
+  background:#F6F1E8; color:#26211B;
+}
+h1{font-size:20px; margin:0 0 4px;}
+h1 small{display:block; font-size:12.5px; font-weight:500; color:#7A6E5F; margin-top:5px;}
+h2{font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:#8A7B68;
+  margin:34px 0 12px; padding-bottom:7px; border-bottom:1px solid #E2D8C7;}
+.row{display:flex; flex-wrap:wrap; gap:14px;}
+.cell{
+  background:#FFFDF8; border:1px solid #E6DCCB; border-radius:16px;
+  padding:14px 10px 10px; text-align:center; min-width:118px; flex:0 0 auto;
+  box-shadow:0 2px 6px rgba(90,70,40,.05);
+}
+.stage-cell{min-width:150px;}
+.cell .box{display:flex; align-items:flex-end; justify-content:center; height:150px;}
+.cell b{display:block; font-size:12px; margin-top:8px;}
+.cell span{display:block; font-size:10.5px; color:#8A7B68; margin-top:2px;}
+.dark{background:#1C1814; border-color:#332C24;}
+.dark b{color:#F0E6D6;} .dark span{color:#9C8F7C;}
+.note{font-size:12.5px; line-height:1.6; color:#5E5346; max-width:760px; margin:10px 0 0;}
+.note code{background:#EDE4D5; padding:1px 5px; border-radius:4px; font-size:11.5px;}
+</style>
+</head>
+<body>
+
+<h1>Tobby — nhân vật dựng bằng CSS
+  <small>Dựng lại từ <code>tobby_sprite_pack(1)</code>: poodle lông xoăn màu mơ, tai xoăn rủ, mắt đen to có điểm sáng, vòng cổ xanh gắn thẻ vàng. Tất cả đều là CSS thuần — không ảnh, không canvas — và đang chuyển động thật.</small>
+</h1>
+
+<h2>1 · Năm cấp độ tiến hoá</h2>
+<div class="row" id="stages"></div>
+<p class="note">Lớn lên <b>không phải</b> là kéo dài chân tay. Từ <code>tiny</code> đến <code>adult</code>: đầu nhỏ lại so với thân (1.30 → 0.92), mắt nhỏ lại so với đầu (1.26 → 0.92), mõm nhô ra (0.62 → 1.08), tai dài và rủ xuống (0.70 → 1.18), ngực sâu hơn (0.74 → 1.16), đuôi từ cụt thành chùm lông kép, bộ lông đậm màu dần, và <b>chỏm lông đỉnh đầu cùng yếm ngực chỉ mọc ra từ cấp <code>young</code></b> — cún con chưa có.</p>
+
+<h2>2 · Cảm xúc — đúng 15 trạng thái engine đang phát</h2>
+<div class="row" id="emotions"></div>
+
+<h2>3 · Tư thế</h2>
+<div class="row" id="poses"></div>
+
+<h2>4 · Phụ kiện mở khoá</h2>
+<div class="row" id="wear"></div>
+
+<h2>5 · Kích thước thật trong app</h2>
+<div class="row" id="sizes"></div>
+<p class="note">Mọi kích thước đều tính bằng <code>em</code> trên một biến <code>--px</code> duy nhất, nên nhân vật thu phóng từ một con số — 72px ở dock desktop, 56px trên điện thoại, 120px trong bảng thông tin — mà không phải chỉnh lại chi tiết nào.</p>
+
+<script>
+const STAGES = [
+  ['tiny','Cún nhỏ xíu','0 XP'], ['puppy','Cún con','250 XP'],
+  ['young','Tobby nhỏ','700 XP'], ['teen','Tobby choai','1500 XP'],
+  ['adult','Tobby trưởng thành','3000 XP']
+];
+const EMOTIONS = [
+  ['idle','Bình thường'], ['happy','Vui'], ['excited','Hào hứng'], ['curious','Tò mò'],
+  ['thinking','Đang nghĩ'], ['worried','Lo lắng'], ['sad','Buồn'], ['sleepy','Buồn ngủ'],
+  ['surprised','Bất ngờ'], ['angry','Bực'], ['working','Đang làm'], ['focused','Tập trung'],
+  ['celebrating','Ăn mừng'], ['proud','Tự hào'], ['confused','Bối rối']
+];
+const POSES = [
+  ['sit','Ngồi','right'],
+  ['walk','Đi sang trái','left'], ['walk','Đi sang phải','right'],
+  ['run','Chạy','right'], ['jump','Nhảy','right'], ['sleep','Ngủ','right']
+];
+const WEAR = [
+  ['collar','Vòng cổ','luôn có'], ['glasses','Kính','25 nhiệm vụ'],
+  ['headphones','Tai nghe','5 phiên tập trung'], ['scarf','Khăn quàng','streak 7 ngày'],
+  ['hat','Mũ','cấp 4'], ['backpack','Ba lô','100 nhiệm vụ'], ['laptop','Laptop','1 dự án']
+];
+
+/** One markup block; stage, emotion, pose and worn items are all attributes. */
+function tobby(opts){
+  const o = opts || {};
+  return `<div class="tb2"
+      data-stage="${o.stage || 'adult'}"
+      data-emotion="${o.emotion || 'idle'}"
+      data-pose="${o.pose || 'sit'}"
+      data-facing="${o.facing || 'right'}"
+      data-wear="${o.wear || 'collar'}"
+      style="--px:${o.px || 1.35}px;">
+    <div class="tb2-shadow"></div>
+    <div class="tb2-in">
+     <div class="tb2-side">
+      <div class="tb2-s-tail"><i></i><i></i></div>
+      <div class="tb2-s-leg bl"></div><div class="tb2-s-leg br"></div>
+      <div class="tb2-s-body"><div class="tb2-curls"></div></div>
+      <div class="tb2-s-leg fl"></div><div class="tb2-s-leg fr"></div>
+      <div class="tb2-s-collar"><i></i></div>
+      <div class="tb2-s-head">
+        <div class="tb2-curls"></div>
+        <div class="tb2-s-ear"></div>
+        <div class="tb2-s-muzzle"></div>
+        <div class="tb2-s-eye"><i></i></div>
+      </div>
+     </div>
+     <div class="tb2-front">
+      <div class="tb2-tail"><i></i><i></i></div>
+      <div class="tb2-leg bl"><i></i></div><div class="tb2-leg br"><i></i></div>
+      <div class="tb2-backpack tb2-item"></div>
+      <div class="tb2-body">
+        <div class="tb2-curls"></div>
+        <div class="tb2-ruff"></div>
+      </div>
+      <div class="tb2-leg fl"><i></i></div><div class="tb2-leg fr"><i></i></div>
+      <div class="tb2-head">
+        <div class="tb2-curls"></div>
+        <div class="tb2-top"></div>
+        <div class="tb2-ear l"></div><div class="tb2-ear r"></div>
+        <div class="tb2-face">
+          <div class="tb2-brow l"></div><div class="tb2-brow r"></div>
+          <div class="tb2-eye l"><i></i><div class="tb2-lid"></div></div>
+          <div class="tb2-eye r"><i></i><div class="tb2-lid"></div></div>
+          <div class="tb2-muzzle"></div>
+          <div class="tb2-nose"></div>
+          <div class="tb2-mouth"></div>
+          <div class="tb2-tongue"></div>
+          <div class="tb2-cheek l"></div><div class="tb2-cheek r"></div>
+        </div>
+      </div>
+      <div class="tb2-collar"><i></i></div>
+      <div class="tb2-scarf tb2-item"><i></i></div>
+      <div class="tb2-hat tb2-item"></div>
+      <div class="tb2-glasses tb2-item"><i></i></div>
+      <div class="tb2-headphones tb2-item"><i></i><i></i></div>
+      <div class="tb2-laptop tb2-item"></div>
+     </div>
+    </div>
+    <div class="tb2-fx">
+      <div class="tb2-zzz"></div><div class="tb2-quest"></div>
+      <div class="tb2-excl"></div><div class="tb2-heart"></div>
+      <div class="tb2-spark"></div><div class="tb2-spark b"></div>
+    </div>
+  </div>`;
+}
+const cell = (inner, label, sub, cls) =>
+  `<div class="cell ${cls||''}"><div class="box">${inner}</div><b>${label}</b><span>${sub||''}</span></div>`;
+
+document.getElementById('stages').innerHTML = STAGES.map(s=>
+  cell(tobby({stage:s[0], px:1.35}), s[1], s[2], 'stage-cell')).join('');
+
+document.getElementById('emotions').innerHTML = EMOTIONS.map(e=>
+  cell(tobby({stage:'adult', emotion:e[0], px:1.0}), e[1], e[0])).join('');
+
+document.getElementById('poses').innerHTML = POSES.map(p=>
+  cell(tobby({stage:'adult', pose:p[0], facing:p[2],
+              emotion:p[0]==='sleep'?'sleepy':'idle', px:1.0}),
+       p[1], p[0] + ' · ' + p[2])).join('');
+
+document.getElementById('wear').innerHTML = WEAR.map(w=>
+  cell(tobby({stage:'adult', wear:'collar '+w[0], px:1.0}), w[1], w[2])).join('');
+
+document.getElementById('sizes').innerHTML = [
+  [0.72,'Dock desktop','72px'], [0.56,'Dock điện thoại','56px'],
+  [1.2,'Bảng thông tin','120px'], [0.34,'Biểu tượng nhỏ','34px']
+].map(s=> cell(tobby({stage:'adult', emotion:'happy', px:s[0]}), s[1], s[2])).join('');
+</script>
+</body>
+</html>

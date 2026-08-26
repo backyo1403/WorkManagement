@@ -1,0 +1,179 @@
+{
+  "sheetWidth": 1152,
+  "sheetHeight": 768,
+  "frameWidth": 192,
+  "frameHeight": 192,
+  "columns": 6,
+  "rows": 4,
+  "totalFrames": 24,
+  "frames": {
+    "tobby_01": {
+      "index": 1,
+      "x": 0,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_02": {
+      "index": 2,
+      "x": 192,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_03": {
+      "index": 3,
+      "x": 384,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_04": {
+      "index": 4,
+      "x": 576,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_05": {
+      "index": 5,
+      "x": 768,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_06": {
+      "index": 6,
+      "x": 960,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_07": {
+      "index": 7,
+      "x": 0,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_08": {
+      "index": 8,
+      "x": 192,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_09": {
+      "index": 9,
+      "x": 384,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_10": {
+      "index": 10,
+      "x": 576,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_11": {
+      "index": 11,
+      "x": 768,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_12": {
+      "index": 12,
+      "x": 960,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_13": {
+      "index": 13,
+      "x": 0,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_14": {
+      "index": 14,
+      "x": 192,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_15": {
+      "index": 15,
+      "x": 384,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_16": {
+      "index": 16,
+      "x": 576,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_17": {
+      "index": 17,
+      "x": 768,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_18": {
+      "index": 18,
+      "x": 960,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_19": {
+      "index": 19,
+      "x": 0,
+      "y": 576,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_20": {
+      "index": 20,
+      "x": 192,
+      "y": 576,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_21": {
+      "index": 21,
+      "x": 384,
+      "y": 576,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_22": {
+      "index": 22,
+      "x": 576,
+      "y": 576,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_23": {
+      "index": 23,
+      "x": 768,
+      "y": 576,
+      "width": 192,
+      "height": 192
+    },
+    "tobby_24": {
+      "index": 24,
+      "x": 960,
+      "y": 576,
+      "width": 192,
+      "height": 192
+    }
+  }
+}

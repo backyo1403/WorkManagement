@@ -1,0 +1,60 @@
+/* Tobby sprite pack
+   Sheet: 1152×768px
+   Frame: 192×192px
+*/
+
+.tobby-sprite {
+  width: 192px;
+  height: 192px;
+  display: inline-block;
+  background-image: url("./tobby_sprite_sheet.png");
+  background-repeat: no-repeat;
+  background-size: 1152px 768px;
+  image-rendering: auto;
+}
+
+.tobby-sprite.frame-01 { background-position: 0px 0px; }
+.tobby-sprite.frame-02 { background-position: -192px 0px; }
+.tobby-sprite.frame-03 { background-position: -384px 0px; }
+.tobby-sprite.frame-04 { background-position: -576px 0px; }
+.tobby-sprite.frame-05 { background-position: -768px 0px; }
+.tobby-sprite.frame-06 { background-position: -960px 0px; }
+.tobby-sprite.frame-07 { background-position: 0px -192px; }
+.tobby-sprite.frame-08 { background-position: -192px -192px; }
+.tobby-sprite.frame-09 { background-position: -384px -192px; }
+.tobby-sprite.frame-10 { background-position: -576px -192px; }
+.tobby-sprite.frame-11 { background-position: -768px -192px; }
+.tobby-sprite.frame-12 { background-position: -960px -192px; }
+.tobby-sprite.frame-13 { background-position: 0px -384px; }
+.tobby-sprite.frame-14 { background-position: -192px -384px; }
+.tobby-sprite.frame-15 { background-position: -384px -384px; }
+.tobby-sprite.frame-16 { background-position: -576px -384px; }
+.tobby-sprite.frame-17 { background-position: -768px -384px; }
+.tobby-sprite.frame-18 { background-position: -960px -384px; }
+.tobby-sprite.frame-19 { background-position: 0px -576px; }
+.tobby-sprite.frame-20 { background-position: -192px -576px; }
+.tobby-sprite.frame-21 { background-position: -384px -576px; }
+.tobby-sprite.frame-22 { background-position: -576px -576px; }
+.tobby-sprite.frame-23 { background-position: -768px -576px; }
+.tobby-sprite.frame-24 { background-position: -960px -576px; }
+
+/* Sample: play all 24 frames in sequence. */
+.tobby-sprite.tobby-animate {
+  animation: tobby-animation 2s steps(24) infinite;
+}
+
+@keyframes tobby-animation {
+  from { background-position: 0 0; }
+  to { background-position: 0 -576px; }
+}
+
+/* Recommended animation that traverses the sheet row-by-row.
+   Override with the explicit frame classes above when a specific pose is needed. */
+.tobby-sprite.tobby-animate-all {
+  animation: tobby-animation-all 2s steps(24) infinite;
+}
+
+@keyframes tobby-animation-all {
+  0% { background-position: 0 0; }
+  100% { background-position: -960px -576px; }
+}

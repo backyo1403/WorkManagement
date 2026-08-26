@@ -1,0 +1,35 @@
+/* Tobby pixel sprite sheet
+   Sheet: 1152x768px
+   Frame: 192x192px
+*/
+.tobby-sprite {
+  width: 192px;
+  height: 192px;
+  background-image: url('./tobby_sprite_sheet.png');
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+.tobby-idle { background-position: -0px -0px; }
+.tobby-happy { background-position: -192px -0px; }
+.tobby-tongue { background-position: -384px -0px; }
+.tobby-wink { background-position: -576px -0px; }
+.tobby-calm { background-position: -768px -0px; }
+.tobby-heart-happy { background-position: -960px -0px; }
+.tobby-excited { background-position: -0px -192px; }
+.tobby-thinking { background-position: -192px -192px; }
+.tobby-sleepy { background-position: -384px -192px; }
+.tobby-curious { background-position: -576px -192px; }
+.tobby-alert { background-position: -768px -192px; }
+.tobby-sparkle { background-position: -960px -192px; }
+.tobby-cool { background-position: -0px -384px; }
+.tobby-adult { background-position: -192px -384px; }
+.tobby-walk-01 { background-position: -384px -384px; }
+.tobby-walk-02 { background-position: -576px -384px; }
+.tobby-walk-03 { background-position: -768px -384px; }
+.tobby-walk-04 { background-position: -960px -384px; }
+.tobby-walk-05 { background-position: -0px -576px; }
+.tobby-run-01 { background-position: -192px -576px; }
+.tobby-run-02 { background-position: -384px -576px; }
+.tobby-run-03 { background-position: -576px -576px; }
+.tobby-happy-alt { background-position: -768px -576px; }
+.tobby-working { background-position: -960px -576px; }
