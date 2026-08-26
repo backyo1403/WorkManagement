@@ -2663,7 +2663,9 @@ body{
 }
 .tb-panel[hidden]{display:none;}
 .tb-panel-head{display:flex; align-items:center; gap:9px; margin-bottom:9px;}
-.tb-mini{width:44px; height:44px; image-rendering:pixelated; flex-shrink:0;}
+/* No `image-rendering:pixelated` — the avatar is a copy of the 3D render now,
+   and nearest-neighbour on a smooth model just makes it look broken. */
+.tb-mini{width:44px; height:44px; flex-shrink:0;}
 .tb-panel-id{flex:1; min-width:0;}
 .tb-panel-id b{display:block; font-size:14px; font-weight:750;}
 .tb-panel-id span{display:block; font-size:10.5px; color:var(--text-3);}
@@ -10682,7 +10684,7 @@ let TB_SHEET_IMG = null, TB_SHEET_READY = false;
       // Repaint whatever is already on screen now that the art exists.
       try{ tobbyPaint(); }catch(e){}
       document.querySelectorAll('.tb-mini').forEach(c=>{
-        try{ tbRender(c, {emotion:'happy', pose:'sit', stage:tobby().evolutionStage, t:.2}); }catch(e){}
+        try{ tobbyDrawAvatar(c); }catch(e){}
       });
     };
     img.onerror = ()=>{ TB_SHEET_READY = false; };   // procedural fallback stands
@@ -11588,12 +11590,37 @@ const Tobby3D = {
   /** A gentle head turn toward a point on screen. Additive to whatever clip is
    *  running, because it writes the ROOT's yaw and the clips do not. */
   lookAt(clientX){
-    if(!this.ready) return;
+    if(!this.ready || this._spun) return;   // a deliberate spin outranks a glance
     const r = this.container.getBoundingClientRect();
     const dx = ((clientX - (r.left + r.width/2)) / Math.max(1, innerWidth/2));
     this._lookTarget = Math.max(-0.5, Math.min(0.5, dx)) * 0.5;
   },
-  faceForward(){ this._lookTarget = 0; },
+  faceForward(){ this._lookTarget = 0; this._spun = false; },
+
+  /** Turn him bodily about the vertical axis, to any angle.
+   *  Distinct from lookAt: that is a glance the idle animation may overwrite,
+   *  this is a heading the user chose and it sticks until they reset it. */
+  spinBy(radians){
+    if(!this.ready) return;
+    this._spun = true;
+    this._lookTarget = (this._lookTarget || 0) + radians;
+  },
+  setYaw(radians){
+    if(!this.ready) return;
+    this._spun = true;
+    this._lookTarget = radians;
+  },
+  /** Snap the shortest way back to facing the user, and hand control back to
+   *  the idle glance. */
+  resetPose(){
+    if(!this.ready) return;
+    // Unwind whole turns first, or "reset" spins him the long way round.
+    const TAU = Math.PI * 2;
+    this._lookX = ((this._lookX % TAU) + TAU) % TAU;
+    if(this._lookX > Math.PI) this._lookX -= TAU;
+    this._spun = false;
+    this._lookTarget = 0;
+  },
 
   resize(){
     if(!this.ready || !this.container) return;
@@ -12460,15 +12487,17 @@ function tobbyPanelHtml(){
       </div>
       <button class="close-x" id="tbPanelClose">✕</button>
     </div>
-    <!-- Age, quietly. Not "12,340 XP to go" — he is growing up, not levelling,
-         and the number that matters is how long you have known each other. -->
-    <div class="tb-xp" title="${L('Ngày thứ','Day')} ${g.days} · ${T.totalXP} XP">
+    <!-- The bar reads as XP and nothing else. The growth commentary it used to
+         carry ("Day 127 · 143 days to Young Tobby") is still true and still
+         reachable from the tooltip and the line below, but stacked inside a
+         16px bar it buried the one number the bar is actually showing. -->
+    <div class="tb-xp" title="${T.totalXP} XP · ${L('Ngày thứ','Day')} ${g.days}${nx
+        ? ' · ' + g.daysLeft + ' ' + L('ngày nữa →','days to') + ' ' + (LANG==='en'?nx.nameEn:nx.name)
+        : ' · ' + L('đã trưởng thành','fully grown')}">
       <i style="width:${Math.max(3, Math.round(g.pct*100))}%"></i>
-      <em>${L('Ngày','Day')} ${g.days}${nx
-        ? ` · ${g.daysLeft} ${L('ngày nữa →','days to')} ${esc(LANG==='en'?nx.nameEn:nx.name)}`
-        : ` · ${L('đã trưởng thành','fully grown')}`}</em>
+      <em>${T.totalXP} XP</em>
     </div>
-    <div class="tb-agehint">${T.totalXP} XP · ${esc(LANG==='en'?rel.en:rel.vi)}${
+    <div class="tb-agehint">${L('Ngày','Day')} ${g.days} · ${esc(LANG==='en'?rel.en:rel.vi)}${
       T.clockSuspect ? ' · ' + L('đồng hồ đang lệch','clock out of sync') : ''}</div>
     <div class="tb-answer" id="tbAnswer" hidden></div>
 
@@ -12529,7 +12558,7 @@ function tobbyOpenPanel(){
   tobbyPlay('curious','INTERACTION', 1800);
   tobby().lastInteractionAt = nowISO();
   const mini = document.getElementById('tobbyMini');
-  if(mini) tbRender(mini, {emotion:'happy', pose:'sit', stage:tobby().evolutionStage, t:0.2, cosmetics:tobby().worn});
+  if(mini) tobbyDrawAvatar(mini);
 
   const ans = document.getElementById('tbAnswer');
   const show = (r)=>{
@@ -12624,9 +12653,51 @@ let tbTrackPointer = null, tbOnResize = null, tbThemeObs = null, tbWanderTimer =
 
 /** Turn his whole body in the scene. The 2D dog is mirrored by CSS; the 3D one
  *  rotates, so the light stays where the light is. */
-function tobbyFace(dir){
+function tobbyFace(dir, full){
   if(!Tobby3D.ready) return;
-  Tobby3D._lookTarget = dir < 0 ? -0.85 : 0.85;
+  // `full` turns him a true 90° into profile — what you want when he is
+  // travelling, so he runs the way he is pointing. The gentler 0.85rad is a
+  // three-quarter turn: enough to read as "facing that way" while keeping both
+  // eyes on you, which is right for a drag or a glance.
+  const a = full ? Math.PI/2 : 0.85;
+  Tobby3D.setYaw(dir < 0 ? -a : a);
+}
+
+/** Send him somewhere along the bottom edge, on foot.
+ *  Gait follows distance the way it would for a real animal: a few steps is a
+ *  walk, across the room is a run, and a long sprint earns a hop on arrival. */
+let tbTravelTimer = 0, tbDocDblHandler = null;
+function tobbyTravelTo(clientX){
+  const dock = document.getElementById('tobbyDock');
+  if(!dock) return;
+  const w = dock.offsetWidth || 76;
+  const from = parseFloat(dock.style.left) || 0;
+  const to = Math.max(8, Math.min(innerWidth - w - 8, clientX - w/2));
+  const dist = Math.abs(to - from);
+  if(dist < 24) return;                       // already there
+
+  const run  = dist > 300;
+  const dir  = to < from ? -1 : 1;
+  const secs = run ? Math.min(1.6, 0.5 + dist/700) : Math.min(2.2, 0.5 + dist/260);
+
+  dock.dataset.facing = dir < 0 ? 'left' : 'right';
+  tobbyFace(dir, true);
+  tobbyPlay(tbAnim.emotion, 'ACTIVITY', secs*1000 + 400, run ? 'run' : 'walk');
+  dock.style.transition = `left ${secs}s cubic-bezier(.33,.02,.35,1)`;
+  dock.style.left = to + 'px';
+
+  clearTimeout(tbTravelTimer);
+  tbTravelTimer = setTimeout(()=>{
+    dock.style.transition = '';
+    tobby().x = to; persist();
+    if(run) tobbyPlay('happy','ACTIVITY', 700, 'jump');   // landing hop
+    // Back to normal: square up to the user and drop the held heading so the
+    // idle glance can take over again.
+    if(Tobby3D.ready) Tobby3D.faceForward();
+    dock.dataset.facing = 'right';
+    tobbyPositionPanel();
+    setTimeout(()=>{ try{ tobbyRelax(); }catch(e){} }, run ? 700 : 0);
+  }, secs*1000 + 60);
 }
 
 /** Re-light on theme / work-group changes. Only the rim and intensities move —
@@ -12674,10 +12745,59 @@ function tobbyStartWander(){
   }, 45000);
 }
 
+/** The panel avatar, taken from the GLB rather than the sprite sheet.
+ *
+ *  It copies the live WebGL canvas instead of standing up a second renderer:
+ *  a second WebGL context for a 44px thumbnail is a real cost, and — more to
+ *  the point — a copy is the same dog wearing the same things in the same
+ *  mood, so the avatar can never disagree with the character three inches
+ *  below it. Falls back to the sprite only when the model is not up. */
+function tobbyDrawAvatar(canvas){
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const src = Tobby3D.ready && Tobby3D.renderer && Tobby3D.renderer.domElement;
+  if(!src || !src.width){
+    try{ tbRender(canvas, {emotion:'happy', pose:'sit', stage:tobby().evolutionStage, t:0.2, cosmetics:tobby().worn}); }catch(e){}
+    return;
+  }
+  try{ Tobby3D.render(); }catch(e){}          // make sure the buffer is current
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  // Contain rather than stretch: the live view is 76x80, the avatar is square,
+  // and scaling to fill would leave him subtly fat in his own portrait.
+  const k = Math.min(canvas.width/src.width, canvas.height/src.height);
+  const w = src.width*k, h = src.height*k;
+  ctx.drawImage(src, (canvas.width-w)/2, (canvas.height-h)/2, w, h);
+}
+
 function wireTobby(){
   const dock = document.getElementById('tobbyDock');
   const body = document.getElementById('tobbyBody');
   if(!dock || !body) return;
+
+  // Double-click him: square up, unwind any spin, drop back to a normal idle.
+  body.addEventListener('dblclick', (e)=>{
+    e.preventDefault(); e.stopPropagation();
+    if(Tobby3D.ready) Tobby3D.resetPose();
+    dock.dataset.facing = 'right';
+    tobbyPlay('happy','INTERACTION', 900, 'sit');
+  });
+
+  // Double-click anywhere else: he comes to you.
+  //
+  // Bound on the document and removed first — wireTobby() runs on every render,
+  // and without the removal each one would leave another live listener behind,
+  // so by the tenth render a single double-click would summon him ten times.
+  if(tbDocDblHandler) document.removeEventListener('dblclick', tbDocDblHandler);
+  tbDocDblHandler = (e)=>{
+    if(!tobbyEnabled()) return;
+    if(e.target.closest('#tobbyDock, #tobbyPanel, .modal, .tb-speech')) return;
+    // Double-click is also "select this word" and "open this row". Anywhere the
+    // user is reading, typing or operating a control, that meaning wins.
+    if(e.target.closest('input, textarea, select, button, a, [contenteditable], [data-open], .data-table, .note-card')) return;
+    if(window.getSelection && String(window.getSelection()).length) return;
+    tobbyTravelTo(e.clientX);
+  };
+  document.addEventListener('dblclick', tbDocDblHandler);
 
   // Restore his spot, clamped in case the window got narrower since last time.
   const T = tobby();
@@ -12688,29 +12808,44 @@ function wireTobby(){
   let drag = null, petCount = 0, petTimer = null;
   body.addEventListener('pointerdown', (e)=>{
     if(e.button && e.button !== 0) return;
-    drag = { x:e.clientX, left:parseFloat(dock.style.left)||0, moved:false };
+    drag = { x:e.clientX, y:e.clientY, left:parseFloat(dock.style.left)||0,
+             yaw:(Tobby3D.ready ? Tobby3D._lookTarget : 0) || 0,
+             moved:false, spun:false };
     body.setPointerCapture(e.pointerId);
   });
   body.addEventListener('pointermove', (e)=>{
     if(!drag) return;
     const dx = e.clientX - drag.x;
+    const dy = e.clientY - drag.y;
     if(Math.abs(dx) > 4) drag.moved = true;
+    // Vertical drag spins him about the vertical axis. Sideways is already
+    // taken by walking, and these two read as one gesture: push him along the
+    // floor, or roll him on the spot to see the other side.
+    if(Math.abs(dy) > 4 && Math.abs(dy) > Math.abs(dx)){
+      drag.spun = true;
+      Tobby3D.setYaw(drag.yaw + dy * 0.022);
+    }
     if(drag.moved){
       dock.style.left = clamp(drag.left + dx) + 'px';
       // He faces the way he is walking. In 3D that is a turn of the body in
       // the scene, not a mirrored image — flipping the element would flip his
       // lighting with him and put the key light on the wrong side.
-      dock.dataset.facing = dx < 0 ? 'left' : 'right';
-      tobbyFace(dx < 0 ? -1 : 1);
+      if(!drag.spun){
+        dock.dataset.facing = dx < 0 ? 'left' : 'right';
+        tobbyFace(dx < 0 ? -1 : 1);
+      }
       tobbyPlay(tbAnim.emotion, 'ACTIVITY', 400, Math.abs(dx) > 90 ? 'run' : 'walk');
       tobbyPositionPanel();
     }
   });
   body.addEventListener('pointerup', (e)=>{
     if(!drag) return;
-    const moved = drag.moved;
+    const moved = drag.moved, spun = drag.spun;
     drag = null;
     try{ body.releasePointerCapture(e.pointerId); }catch(_){}
+    // A spin is a held heading — it survives the release and is cleared by the
+    // double-click reset, not by letting go.
+    if(spun && !moved){ tobby().x = parseFloat(dock.style.left)||0; persist(); return; }
     if(moved){
       tobby().x = parseFloat(dock.style.left) || 0;
       persist();
