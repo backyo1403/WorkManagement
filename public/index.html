@@ -27,6 +27,17 @@
   var t = localStorage.getItem('bachoffice.theme');
   if(!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   document.documentElement.setAttribute('data-theme', t);
+  /* Motion is a setting, not a verdict handed down by the OS.
+     Windows' "Animation effects: off" reports prefers-reduced-motion, which was
+     silently switching off the weather, the star field and the map's easing —
+     effects that are the point of those features. The app now decides:
+       full   → always animate
+       reduced→ never animate
+       system → follow the OS (the accessible default for anyone who has not
+                expressed a preference here)
+     Set before first paint so nothing animates for a frame and then stops. */
+  var m = localStorage.getItem('bachoffice.motion') || 'full';
+  document.documentElement.setAttribute('data-motion', m);
 }catch(e){} })();
 </script>
 <style>
@@ -1391,8 +1402,8 @@ a{color:inherit;}
 @media (prefers-reduced-motion: reduce){
   /* Motion stops; the scene stays. Particles are placed statically by the
      renderer in this mode so nothing ends up parked off-screen. */
-  .weather-layer *{animation:none !important;}
-  .wx-drop{transform:none !important;}
+  :root:not([data-motion="full"]) .weather-layer *{animation:none !important;}
+  :root:not([data-motion="full"]) .wx-drop{transform:none !important;}
 }
 /* Phones keep a lighter version rather than none: the scene is half the point
    of the feature, and a dozen composited dots is not what drains a battery. */
@@ -1608,8 +1619,15 @@ a{color:inherit;}
 @keyframes dotIn{ from{opacity:0; transform:scale(.4);} to{opacity:1; transform:none;} }
 .cal-pill{animation:dotIn 220ms cubic-bezier(.34,1.4,.64,1) both;}
 
+/* Every reduced-motion block below is scoped to :not([data-motion="full"]).
+   The OS preference still wins for anyone who has not chosen in-app, but a
+   user who has explicitly asked this app for full motion gets it — the blanket
+   rule here was overriding the weather, the star field and the map easing with
+   a 0.001ms duration, which is why they looked frozen rather than calm. */
 @media (prefers-reduced-motion: reduce){
-  *,*::before,*::after{animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important;}
+  :root:not([data-motion="full"]) *,
+  :root:not([data-motion="full"]) *::before,
+  :root:not([data-motion="full"]) *::after{animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important;}
 }
 
 /* Lifted clear of Tobby, who stands on the same edge. Toasts used to land on
@@ -2173,7 +2191,10 @@ body{
 /* The capacity arc is the one place a hard glow is worth the cost. */
 .wm-ring-cap{fill:none; stroke:var(--wm-cyan); stroke-width:6; stroke-linecap:round;
   filter:drop-shadow(0 0 7px rgba(63,216,255,.85));
-  transition:stroke-dashoffset .9s cubic-bezier(.22,.61,.36,1);}
+  /* 2.2s, and eased so it decelerates into place. At .9s the arc had finished
+     sweeping before the eye had found it — the number changed but the motion
+     that was supposed to make the change legible never registered. */
+  transition:stroke-dashoffset 2.2s cubic-bezier(.16,.84,.32,1);}
 .wm-card-dir{fill:rgba(207,233,247,.72); font-size:19px; font-weight:800; letter-spacing:.1em;
   text-anchor:middle; dominant-baseline:middle;}
 
@@ -2383,9 +2404,14 @@ body{
   .wm-projects{justify-content:flex-start;}
 }
 @media (prefers-reduced-motion: reduce){
-  .wm-star,.wm-bit,.wm-core,.wm-core-halo,.wm-core-ring,
-  .wm-contour,.wm-pin.overdue .wm-pin-badge{animation:none;}
-  .wm-star{opacity:.45;}   /* the twinkle carried their visibility */
+  :root:not([data-motion="full"]) .wm-star,
+  :root:not([data-motion="full"]) .wm-bit,
+  :root:not([data-motion="full"]) .wm-core,
+  :root:not([data-motion="full"]) .wm-core-halo,
+  :root:not([data-motion="full"]) .wm-core-ring,
+  :root:not([data-motion="full"]) .wm-contour,
+  :root:not([data-motion="full"]) .wm-pin.overdue .wm-pin-badge{animation:none;}
+  :root:not([data-motion="full"]) .wm-star{opacity:.45;}   /* the twinkle carried their visibility */
 }
 
 /* =========================================================
@@ -2706,10 +2732,21 @@ body{
   .tb-panel{bottom:140px !important; left:10px !important; right:10px; width:auto;}
 }
 @media (prefers-reduced-motion: reduce){
-  .tobby-dock{transition:none;}
-  .tobby-dock[data-alert="urgent"]::before{animation:none;}
-  .tb-speech,.tb-panel{animation:none;}
+  :root:not([data-motion="full"]) .tobby-dock{transition:none;}
+  :root:not([data-motion="full"]) .tobby-dock[data-alert="urgent"]::before{animation:none;}
+  :root:not([data-motion="full"]) .tb-speech,
+  :root:not([data-motion="full"]) .tb-panel{animation:none;}
 }
+/* An explicit in-app choice of "reduced" has to work even on a machine whose
+   OS says nothing — otherwise the setting would only do something for people
+   who had already turned motion down elsewhere. */
+:root[data-motion="reduced"] *,
+:root[data-motion="reduced"] *::before,
+:root[data-motion="reduced"] *::after{
+  animation-duration:.001ms !important; animation-iteration-count:1 !important;
+  transition-duration:.001ms !important;
+}
+:root[data-motion="reduced"] .weather-layer *{animation:none !important;}
 @media print{ .tobby-dock,.tb-panel{display:none !important;} }
 </style>
 </head>
@@ -4456,10 +4493,11 @@ function render(){
       </div>
     </div>
     <div class="main"><div class="view" id="view"></div></div>
-    ${tobbyEnabled() ? tobbyDockHtml() : `
-    <div class="fab-dock" id="fabDock">
-      <button class="fab-composer" id="fabComposer" title="Mở bảng chọn" aria-label="Mở bảng chọn nhóm">⋯</button>
-    </div>`}
+    <!-- Tobby, always. The old ⋯ dock used to take his place whenever he was
+         switched off, which meant a theme change or a disabled setting brought
+         a three-dot button back in his spot. He is the permanent inhabitant of
+         that corner now; everything the ⋯ opened lives in his panel. -->
+    ${tobbyDockHtml()}
     <div class="composer-pop" id="composerPop" hidden>
       <div class="composer-pop-head">✏️ Hôm nay cần làm gì? <button class="close-x" id="composerPopClose">✕</button></div>
       <div id="composerPopBody"></div>
@@ -4476,8 +4514,31 @@ function render(){
   wireComposerPopup();
   renderView();
   // Tobby is wired after the view so his panel can reach anything it renders.
-  if(tobbyEnabled()){ wireTobby(); tobbyStartClock(); }
+  // Unconditional: he is always in the DOM now, so he always needs his
+  // handlers — gating this was what left the dock inert and unclickable.
+  wireTobby(); tobbyStartClock();
 }
+/** Should motion be suppressed right now?
+ *  The app setting is authoritative; the OS is consulted only when the user
+ *  has expressed no preference here. Going through this instead of calling
+ *  matchMedia directly is what lets an explicit "full" override a system-wide
+ *  "animation effects: off", which was freezing the weather and the map.
+ */
+function tbReduceMotion(){
+  const m = document.documentElement.getAttribute('data-motion');
+  if(m === 'full')    return false;
+  if(m === 'reduced') return true;
+  try{ return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+  catch(e){ return false; }
+}
+/** Persist the choice and apply it without a reload. */
+function setMotionMode(mode){
+  if(!['full','reduced','system'].includes(mode)) mode = 'full';
+  document.documentElement.setAttribute('data-motion', mode);
+  try{ localStorage.setItem('bachoffice.motion', mode); }catch(e){}
+  try{ applyWeatherScene(WEATHER.kind); }catch(e){}
+}
+
 /* Floating ⋯ quick-capture: fixed to the viewport so it stays put while
    scrolling; click outside or Esc to dismiss. */
 function wireComposerPopup(){
@@ -4768,7 +4829,7 @@ function checkboxHtml(done, dataAttr, size){
 }
 /** A short, soft burst of dots at the checkbox — celebratory but not loud. */
 function sparkBurst(el){
-  if(!el || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if(!el || tbReduceMotion()) return;
   const r = el.getBoundingClientRect();
   const cx = r.left + r.width/2, cy = r.top + r.height/2;
   const colors = ['var(--success)','var(--brand)','var(--warning)'];
@@ -4879,7 +4940,7 @@ function showComboBanner(count){
 
 /** Collapse a row before removing it, so deletion reads as a transition. */
 function animateRowOut(el, done){
-  if(!el || window.matchMedia('(prefers-reduced-motion: reduce)').matches){ done(); return; }
+  if(!el || tbReduceMotion()){ done(); return; }
   const wrap = el.closest('.task-row-wrap') || el.closest('tr') || el;
   wrap.classList.add('row-removing');
   setTimeout(done, 230);
@@ -5015,7 +5076,7 @@ function applyWeatherScene(kind){
   // animation. With motion reduced that animation never runs, so they would sit
   // parked outside the viewport and the weather would look broken rather than
   // calm. Scatter them across the screen instead and let them hold still.
-  const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const still = window.matchMedia && tbReduceMotion();
   const park = ()=> still ? `top:${rnd(2,94).toFixed(1)}%;` : '';
   /** One pixel cloud: a row of blocks with a shorter row stacked on top, all on
    *  a single pixel unit so the steps line up. Bigger clouds simply use a
@@ -6167,7 +6228,7 @@ function wmFillCapacity(root){
   requestAnimationFrame(()=>{ requestAnimationFrame(()=>{ arc.style.strokeDashoffset = to; }); });
   // Belt and braces: if frames are not being served (hidden tab), land on the
   // value anyway so the ring is never stuck reading zero when it comes back.
-  setTimeout(()=>{ if(arc.isConnected) arc.style.strokeDashoffset = to; }, 900);
+  setTimeout(()=>{ if(arc.isConnected) arc.style.strokeDashoffset = to; }, 2400);
 }
 
 /* ---------- idle auto-rotation ----------
@@ -6186,7 +6247,7 @@ function wmStopSpin(){
 }
 function wmStartSpin(){
   wmStopSpin();
-  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if(window.matchMedia && tbReduceMotion()) return;
   wmSpinTimer = setInterval(()=>{
     const root = document.getElementById('workMap');
     if(!root){ wmStopSpin(); return; }        // widget navigated away from
@@ -6379,8 +6440,8 @@ function wmStarfield(){
     const drift = (110 - parseFloat(s)*26 + rnd()*70).toFixed(1);
     out += `<i class="wm-star" style="left:${(rnd()*100).toFixed(1)}%;top:${(rnd()*100).toFixed(1)}%;
       width:${s}px;height:${s}px;
-      animation-duration:${(2.5+rnd()*5).toFixed(1)}s, ${drift}s;
-      animation-delay:-${(rnd()*6).toFixed(1)}s, -${(rnd()*parseFloat(drift)).toFixed(1)}s;"></i>`;
+      animation-duration:${(6+rnd()*9).toFixed(1)}s, ${drift}s;
+      animation-delay:-${(rnd()*14).toFixed(1)}s, -${(rnd()*parseFloat(drift)).toFixed(1)}s;"></i>`;
   }
   return out;
 }
@@ -12047,6 +12108,22 @@ function tobbyPaint(){
   // code nobody ever runs.
   const stage3d = document.getElementById('tobbyStage3D');
   if(stage3d && !Tobby3D.failed){
+    // Re-adopt the canvas after a re-render.
+    //
+    // renderApp() rebuilds the dock's markup, which throws away the <span> the
+    // WebGL canvas was living in. The renderer, scene and mixer all survive —
+    // but `container` now points at a node no longer in the document, so Tobby
+    // vanished, his canvas went on rendering to nothing every frame, and the
+    // empty dock still swallowed the clicks aimed at him. Switching the theme
+    // was the fastest way to see it because that re-renders everything.
+    //
+    // Moving the existing canvas into the new container costs one DOM append
+    // and keeps the loaded model, so this is a reattach, not a reload.
+    if(Tobby3D.ready && Tobby3D.container !== stage3d){
+      Tobby3D.container = stage3d;
+      stage3d.appendChild(Tobby3D.renderer.domElement);
+      Tobby3D.resize();
+    }
     if(!Tobby3D.ready && !Tobby3D.loading){
       Tobby3D.init(stage3d).then(ok=>{
         if(!ok) return;
@@ -12091,7 +12168,7 @@ function tobbySync3D(){
 function tobbyParticles(n){
   const dock = document.getElementById('tobbyDock');
   if(!dock) return;
-  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if(window.matchMedia && tbReduceMotion()) return;
   const wrap = document.createElement('div');
   wrap.className = 'tb-parts';
   const tones = ['#FFD75E','#6FD3F2','#8BE39B','#FF9ED2','#FFFFFF'];
@@ -12435,6 +12512,12 @@ function tobbyPanelHtml(){
       <label><input type="checkbox" id="tbChatty" ${T.chatty?'checked':''}> ${L('Tobby nói chuyện','Tobby speaks')}</label>
       <label><input type="checkbox" id="tbSounds" ${T.sounds?'checked':''}> ${L('Âm thanh','Sounds')}</label>
       <label><input type="checkbox" id="tbEnabled" ${T.enabled?'checked':''}> ${L('Hiện Tobby','Show Tobby')}</label>
+      <label class="tb-motion">${L('Chuyển động','Motion')}
+        <select id="tbMotion">
+          ${[['full',L('Đầy đủ','Full')],['system',L('Theo hệ thống','Follow system')],['reduced',L('Giảm','Reduced')]]
+            .map(([v,t])=>`<option value="${v}"${(document.documentElement.getAttribute('data-motion')||'full')===v?' selected':''}>${t}</option>`).join('')}
+        </select>
+      </label>
     </div>`;
 }
 function tobbyOpenPanel(){
@@ -12499,6 +12582,8 @@ function tobbyOpenPanel(){
     if(key==='enabled'){ tobbyClosePanel(); render(); }
   }; };
   bind('tbChatty','chatty'); bind('tbSounds','sounds'); bind('tbEnabled','enabled');
+  const mo = document.getElementById('tbMotion');
+  if(mo) mo.onchange = ()=> setMotionMode(mo.value);
   document.getElementById('tbPanelClose').onclick = tobbyClosePanel;
   applyLang(p);
 }
