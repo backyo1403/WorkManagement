@@ -10669,6 +10669,7 @@ function wireNotifications(){
    SETTINGS
    ========================================================= */
 const SETTINGS_NAV = [
+  ["ai","✨ AI & Gemini"],
   ["language","🌐 Ngôn ngữ"],
   ["ambience","🌦️ Hiệu ứng & Âm thanh"],
   ["security","🔒 Bảo mật & Khoá màn hình"],
@@ -10687,6 +10688,114 @@ function viewSettings(){
       <div class="settings-panel">${settingsPanelHtml()}</div>
     </div>
   `;
+}
+/** AI & Gemini. Built from the same card/pill/field pieces as every other
+ *  settings panel — this is a section of Bach Office, not a guest UI. */
+function settingsAIPanel(){
+  const a = aiSettings();
+  const proxy = geminiService.proxyReady;
+  const dot = a.apiKey || proxy
+    ? (aiStatus.state==='ok'   ? '<span style="color:var(--success)">●</span> Đã kết nối'
+     : aiStatus.state==='fail' ? '<span style="color:var(--danger)">⚠</span> Có lỗi kết nối'
+     :                            '<span style="color:var(--text-3)">○</span> Chưa kiểm tra')
+    : '<span style="color:var(--text-3)">○</span> Chưa cấu hình';
+  return `<div class="card" id="aiSection" style="max-width:560px;margin-bottom:16px;">
+    <h3>✨ Gemini</h3>
+    <div style="font-size:12.5px;color:var(--text-2);margin-bottom:14px;line-height:1.55;">
+      Gemini là phần <b>suy nghĩ</b>; Tobby vẫn là người nói chuyện với bạn. Mọi câu trả lời đều dựa trên dữ liệu thật trong Bach Office.
+    </div>
+    <label class="switch-row"><input type="checkbox" id="ai_enabled" ${a.enabled?'checked':''}> <span>Bật Gemini</span></label>
+
+    <div class="field" style="margin-top:12px;">
+      <label>Gemini API key ${proxy ? '<span class="badge success" style="margin-left:6px;">máy chủ đã cấu hình</span>' : ''}</label>
+      <div style="display:flex;gap:8px;">
+        <input id="ai_key" type="password" autocomplete="off" spellcheck="false"
+          placeholder="${proxy ? 'Không cần — máy chủ đang giữ key' : 'Dán key của bạn'}"
+          value="${esc(a.apiKey||'')}" style="flex:1;">
+        <button class="btn btn-ghost btn-sm" id="ai_toggle_key" type="button">Hiện</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 4px;">
+      <button class="btn btn-primary btn-sm" id="ai_save">Lưu API key</button>
+      <button class="btn btn-ghost btn-sm" id="ai_test">Kiểm tra kết nối</button>
+      <button class="btn btn-ghost btn-sm" id="ai_clear_key">Xoá key</button>
+    </div>
+    <div style="font-size:12.5px;margin:10px 0 4px;">Trạng thái: ${dot}</div>
+    <div id="ai_test_out" style="font-size:12px;color:var(--text-3);min-height:16px;"></div>
+
+    <div class="field" style="margin-top:12px;">
+      <label>Mô hình</label>
+      <select id="ai_model">${AI_CONFIG.models.map(([v,l])=>`<option value="${v}" ${a.model===v?'selected':''}>${l}</option>`).join('')}</select>
+    </div>
+  </div>
+
+  <div class="card" style="max-width:560px;margin-bottom:16px;">
+    <h3>🐶 Tobby AI</h3>
+    <label class="switch-row"><input type="checkbox" id="ai_tobby" ${a.tobbyAI?'checked':''}> <span>Cho Tobby dùng Gemini khi trả lời</span></label>
+    <div class="field" style="margin-top:12px;">
+      <label>Tính cách</label>
+      <select id="ai_persona">
+        <option value="friendly" ${a.personality==='friendly'?'selected':''}>Thân thiện</option>
+        <option value="professional" ${a.personality==='professional'?'selected':''}>Chuyên nghiệp</option>
+        <option value="minimal" ${a.personality==='minimal'?'selected':''}>Ngắn gọn</option>
+        <option value="playful" ${a.personality==='playful'?'selected':''}>Tinh nghịch</option>
+      </select>
+    </div>
+    <div style="margin-top:12px;"><button class="btn btn-ghost btn-sm" id="ai_clear_chat">Xoá hội thoại (${tbChatLoad().length})</button></div>
+    <div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">Hội thoại là ngữ cảnh tạm thời và tách khỏi <b>Kỷ niệm</b> dài hạn của Tobby.</div>
+  </div>
+
+  <div class="card" style="max-width:560px;">
+    <h3>🔐 Quyền riêng tư</h3>
+    <div style="font-size:12.5px;color:var(--text-2);line-height:1.6;">
+      Khi bạn hỏi Tobby, chỉ một phần dữ liệu được gửi đi: tiêu đề và hạn của nhiệm vụ, tên dự án, tiêu đề ghi chú kèm trích đoạn ngắn, số phút tập trung.
+      <b>Không</b> gửi mật khẩu, API key, hay toàn bộ nội dung ghi chú.
+      <div style="margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--surface-2);">
+        ${proxy
+          ? 'Máy chủ đang giữ key (biến môi trường <code>GEMINI_API_KEY</code>) — key không bao giờ đi qua trình duyệt.'
+          : '<b>Chế độ cục bộ:</b> key bạn dán được lưu trong <code>localStorage</code> của <i>trình duyệt này</i> và gửi thẳng tới Google. Cách này tiện để dùng riêng, nhưng <b>không phải là nơi cất giữ an toàn</b> — bất cứ script nào chạy trong trang đều đọc được. Để dùng thật, đặt <code>GEMINI_API_KEY</code> trên máy chủ.'}
+      </div>
+    </div>
+  </div>`;
+}
+let aiStatus = { state:'idle' };
+function wireSettingsAI(){
+  const a = aiSettings();
+  const key = document.getElementById('ai_key');
+  const out = document.getElementById('ai_test_out');
+  const en  = document.getElementById('ai_enabled');
+  if(en) en.onchange = ()=>{ a.enabled = en.checked; persist(); };
+  const tb = document.getElementById('ai_tobby');
+  if(tb) tb.onchange = ()=>{ a.tobbyAI = tb.checked; persist(); };
+  const md = document.getElementById('ai_model');
+  if(md) md.onchange = ()=>{ a.model = md.value; persist(); };
+  const ps = document.getElementById('ai_persona');
+  if(ps) ps.onchange = ()=>{ a.personality = ps.value; persist(); };
+  const tg = document.getElementById('ai_toggle_key');
+  if(tg && key) tg.onclick = ()=>{
+    key.type = key.type === 'password' ? 'text' : 'password';
+    tg.textContent = key.type === 'password' ? 'Hiện' : 'Ẩn';
+  };
+  const sv = document.getElementById('ai_save');
+  if(sv && key) sv.onclick = ()=>{ a.apiKey = key.value.trim(); persist(); toast('Đã lưu API key trong trình duyệt này'); };
+  const cl = document.getElementById('ai_clear_key');
+  if(cl) cl.onclick = ()=>{ a.apiKey = ''; persist(); renderView(); toast('Đã xoá key'); };
+  const cc = document.getElementById('ai_clear_chat');
+  if(cc) cc.onclick = ()=>{ tbChatClear(); renderView(); toast('Đã xoá hội thoại'); };
+  const ts = document.getElementById('ai_test');
+  if(ts) ts.onclick = async ()=>{
+    if(key) a.apiKey = key.value.trim();
+    persist();
+    ts.disabled = true; out.textContent = 'Đang kiểm tra…';
+    geminiService.proxyReady = null;                 // re-probe on every test
+    const r = await geminiService.testConnection();
+    aiStatus.state = r.ok ? 'ok' : 'fail';
+    // Never echoes the key or the upstream body — only what the user can act on.
+    out.textContent = r.ok
+      ? ('✓ Gemini đã kết nối' + (r.via==='proxy' ? ' (qua máy chủ)' : ' (chế độ cục bộ)'))
+      : ('✕ Không kết nối được — ' + r.message);
+    ts.disabled = false;
+  };
 }
 function settingsLanguagePanel(){
   return `<div class="card" style="max-width:460px;margin-bottom:16px;">
@@ -10774,6 +10883,7 @@ function settingsSecurityPanel(){
   </div>`;
 }
 function settingsPanelHtml(){
+  if(settingsTab==='ai') return settingsAIPanel();
   if(settingsTab==='language') return settingsLanguagePanel();
   if(settingsTab==='ambience') return settingsAmbiencePanel();
   if(settingsTab==='security') return settingsSecurityPanel();
@@ -10910,6 +11020,7 @@ async function testZaloConnection(){
 }
 function wireSettings(){
   document.querySelectorAll('[data-settings-tab]').forEach(el=> el.onclick = ()=>{ settingsTab = el.dataset.settingsTab; renderView(); });
+  if(settingsTab==='ai') wireSettingsAI();
   document.querySelectorAll('[data-weather-set]').forEach(el=> el.onclick = ()=>{
     STATE.settings.weather = el.dataset.weatherSet === '1';
     persist();
@@ -12929,6 +13040,399 @@ const TB_INTENTS = [
   ['progress', ['tiến độ','lớn','level','xp','progress','how am i','grown','stage']],
   ['memory',   ['nhớ','kỷ niệm','remember','memory','trước đây']],
 ];
+/* =========================================================
+   TOBBY AI — Gemini as the intelligence, Tobby as the voice
+   ---------------------------------------------------------
+   Three layers, kept apart on purpose:
+     geminiService   — talks to the model. Knows nothing about Bach Office.
+     tobbyAIService  — builds context, asks, validates, executes. Knows both.
+     Bach Office     — owns every task, note, project and minute. The model
+                       never writes to it; it can only PROPOSE an action from
+                       a fixed list, which is validated here before anything
+                       happens.
+
+   Two key paths, and the difference is stated plainly in Settings rather than
+   blurred: the /api/gemini proxy keeps a deployment key server-side and is
+   preferred whenever it answers; a key pasted into Settings lives in this
+   browser's localStorage and is used only when the proxy is unavailable. A
+   key in a browser is not secret and the UI says so.
+   ========================================================= */
+const AI_CONFIG = {
+  provider: 'gemini',
+  model: 'gemini-2.0-flash',
+  models: [
+    ['gemini-2.0-flash',      'Gemini Flash (nhanh, mặc định)'],
+    ['gemini-2.0-flash-lite', 'Gemini Flash Lite (tiết kiệm)'],
+    ['gemini-1.5-flash',      'Gemini 1.5 Flash'],
+    ['gemini-1.5-pro',        'Gemini 1.5 Pro (sâu hơn, chậm hơn)'],
+  ],
+  proxyUrl: '/api/gemini',
+  historyMax: 20,
+};
+function aiSettings(){
+  const s = STATE.settings;
+  if(!s.ai) s.ai = { enabled:false, apiKey:'', model:AI_CONFIG.model, personality:'friendly', tobbyAI:true };
+  if(s.ai.tobbyAI == null) s.ai.tobbyAI = true;
+  return s.ai;
+}
+/** Never true just because a key was typed — the whole feature has to be on. */
+function aiEnabled(){ const a = aiSettings(); return !!(a.enabled && a.tobbyAI); }
+
+const geminiService = {
+  proxyReady: null,             // null = not probed yet
+
+  /** Is the server-side proxy available AND configured? Probed once. */
+  async probeProxy(){
+    if(this.proxyReady !== null) return this.proxyReady;
+    try{
+      const r = await fetch(AI_CONFIG.proxyUrl, { method:'GET' });
+      const j = await r.json().catch(()=>null);
+      this.proxyReady = !!(r.ok && j && j.configured);
+    }catch(e){ this.proxyReady = false; }
+    return this.proxyReady;
+  },
+
+  buildRequest(systemText, history, userText){
+    return {
+      model: aiSettings().model || AI_CONFIG.model,
+      systemInstruction: { parts:[{ text: systemText }] },
+      contents: [
+        ...history.map(m=>({ role: m.role === 'tobby' ? 'model' : 'user',
+                             parts:[{ text: String(m.text||'').slice(0,4000) }] })),
+        { role:'user', parts:[{ text: userText }] },
+      ],
+      generationConfig: { temperature:0.7, maxOutputTokens:1024, responseMimeType:'application/json' },
+    };
+  },
+
+  /** Pull the model's JSON out of the envelope, tolerating a code fence. */
+  parseResponse(data){
+    const raw = (((data||{}).candidates||[])[0]||{}).content;
+    const text = ((raw||{}).parts||[]).map(p=>p.text||'').join('').trim();
+    if(!text) return null;
+    let s = text.replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
+    try{ return JSON.parse(s); }
+    catch(e){
+      const a = s.indexOf('{'), b = s.lastIndexOf('}');
+      if(a>=0 && b>a){ try{ return JSON.parse(s.slice(a,b+1)); }catch(_){} }
+      return { reply: s };                     // prose is still an answer
+    }
+  },
+
+  handleError(e){
+    const code = (e && e.code) || 'unknown';
+    const M = {
+      not_configured:      TB_L('Gemini chưa được cấu hình.','Gemini is not configured.'),
+      rate_limited:        TB_L('Gemini đang quá tải, thử lại sau một chút nhé.','Gemini is rate limited — try again shortly.'),
+      upstream_error:      TB_L('Gemini trả về lỗi.','Gemini returned an error.'),
+      upstream_unreachable:TB_L('Không kết nối được tới Gemini.','Could not reach Gemini.'),
+      no_key:              TB_L('Chưa có API key.','No API key set.'),
+    };
+    // Deliberately never surfaces the upstream body — it can name the key's
+    // project or quota.
+    return M[code] || TB_L('Hmm, tớ không gọi được Gemini lúc này.',"Hmm, I can't reach Gemini right now.");
+  },
+
+  async sendMessage(systemText, history, userText){
+    const req = this.buildRequest(systemText, history, userText);
+    if(await this.probeProxy()){
+      const r = await fetch(AI_CONFIG.proxyUrl, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(req) });
+      const j = await r.json().catch(()=>null);
+      if(!r.ok || !j || !j.ok){ const e=new Error('proxy'); e.code=(j&&j.error)||'upstream_error'; throw e; }
+      return this.parseResponse(j.data);
+    }
+    // Local mode. The key is this browser's, and Settings says so.
+    const key = (aiSettings().apiKey||'').trim();
+    if(!key){ const e=new Error('nokey'); e.code='no_key'; throw e; }
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/'
+      + encodeURIComponent(req.model) + ':generateContent';
+    let r;
+    try{
+      r = await fetch(url, { method:'POST',
+        headers:{'Content-Type':'application/json','x-goog-api-key':key},
+        body: JSON.stringify({ contents:req.contents, systemInstruction:req.systemInstruction,
+                               generationConfig:req.generationConfig }) });
+    }catch(err){ const e=new Error('net'); e.code='upstream_unreachable'; throw e; }
+    if(!r.ok){ const e=new Error('api'); e.code = r.status===429?'rate_limited':'upstream_error'; throw e; }
+    return this.parseResponse(await r.json());
+  },
+
+  async testConnection(){
+    try{
+      const out = await this.sendMessage(
+        'Reply with JSON only: {"reply":"ok"}', [], 'ping');
+      return { ok: !!out, via: this.proxyReady ? 'proxy' : 'local' };
+    }catch(e){ return { ok:false, message:this.handleError(e) }; }
+  },
+};
+
+/** The sanitised slice of Bach Office the model is allowed to see.
+ *  Trimmed hard: recent and relevant only, never the whole store, never
+ *  settings, never keys, never note bodies. */
+function buildTobbyAIContext(scope){
+  const now = new Date();
+  const tasks = activeTasks();
+  const soon = new Date(now.getTime() + 14*86400000);
+  const slim = (t)=>({
+    id:t.id, title:t.title, status:t.status, priority:t.priority,
+    dueDate:t.deadline || null, start:t.start || null,
+    projectId:t.projectId || null, completion:computeCompletion(t),
+    overdue:isOverdue(t), tags:(t.hashtags||[]).slice(0,6),
+  });
+  const relevant = tasks.filter(t=>{
+    if(t.status !== 'Hoàn thành') return true;                 // everything open
+    return t.completedAt && new Date(t.completedAt) > new Date(now.getTime()-7*86400000);
+  }).slice(0, 120);
+  const ctx = {
+    currentDate: ymdLocal(now),
+    currentTime: fmtHM(now.toISOString()),
+    weekday: now.toLocaleDateString(loc(), { weekday:'long' }),
+    activeGroup: ACTIVE_GROUP || null,
+    tasks: relevant.map(slim),
+    projects: groupedProjects().filter(p=>!p.archived).slice(0,40).map(p=>({
+      id:p.id, name:p.name, deadline:p.deadline||null, progress:projectProgress(p.id),
+    })),
+    notes: (STATE.notes||[]).filter(n=>!n.archived).slice(0,60).map(n=>({
+      id:n.id, title:n.title, notebookId:n.notebookId||null,
+      updatedAt:n.updatedAt||null,
+      // A short excerpt only — enough to find a note by, not the note itself.
+      excerpt: String(n.content||'').replace(/[#*`>\-]/g,' ').replace(/\s+/g,' ').trim().slice(0,160),
+    })),
+    upcoming: tasks.filter(t=> t.deadline && new Date(t.deadline)>=now && new Date(t.deadline)<=soon)
+      .sort((a,b)=> new Date(a.deadline)-new Date(b.deadline)).slice(0,20)
+      .map(t=>({ id:t.id, title:t.title, dueDate:t.deadline })),
+    overdue: tasks.filter(isOverdue).slice(0,20).map(t=>({ id:t.id, title:t.title, dueDate:t.deadline })),
+    focus: (()=>{ try{ return tobbyFocusSummary(); }catch(e){ return null; } })(),
+    tobby: (()=>{ const T=tobby(); const g=TobbyGrowth.progress();
+      return { stage:g.stage.key, ageDays:g.days, relationship:tobbyRelationshipFor(T.totalXP).vi,
+               mood:tbAnim.emotion, xp:T.totalXP }; })(),
+  };
+  if(scope === 'light'){ delete ctx.notes; ctx.tasks = ctx.tasks.slice(0,40); }
+  return ctx;
+}
+/** Focus minutes today/this week, from the real sessions. */
+function tobbyFocusSummary(){
+  const T = tobby();
+  const list = (T.focusSessions||[]);
+  const now = new Date(), t0 = new Date(now); t0.setHours(0,0,0,0);
+  const w0 = new Date(t0); w0.setDate(w0.getDate()-w0.getDay());
+  const sum = (from)=> list.filter(s=> s.at && new Date(s.at) >= from)
+                           .reduce((n,s)=> n + (s.minutes||0), 0);
+  return { todayMinutes: sum(t0), weekMinutes: sum(w0), sessions: list.length };
+}
+
+/* ---------- actions the model may PROPOSE ---------- */
+const TOBBY_AI_ACTIONS = {
+  CREATE_TASK:       { destructive:false, needs:['title'] },
+  UPDATE_TASK:       { destructive:false, needs:['id'] },
+  COMPLETE_TASK:     { destructive:false, needs:['id'] },
+  DELETE_TASK:       { destructive:true,  needs:['id'] },
+  CREATE_NOTE:       { destructive:false, needs:['title'] },
+  UPDATE_NOTE:       { destructive:false, needs:['id'] },
+  OPEN_TASK:         { destructive:false, needs:['id'] },
+  OPEN_PROJECT:      { destructive:false, needs:['id'] },
+  OPEN_NOTE:         { destructive:false, needs:['id'] },
+  OPEN_CALENDAR:     { destructive:false, needs:[] },
+  START_FOCUS:       { destructive:false, needs:[] },
+  SHOW_NOTIFICATIONS:{ destructive:false, needs:[] },
+};
+/** Shape-check an action before it is allowed anywhere near STATE.
+ *  Anything not on the list, or missing a field, or naming a record that does
+ *  not exist, is refused — the model cannot invent an id into existence. */
+/** TASK_PRIORITIES is a list of [value, label] PAIRS, not plain strings —
+ *  `.includes("Cao")` on it is always false, which silently dropped every
+ *  priority. Compare against the values. */
+function aiValidPriority(p){
+  return !!p && TASK_PRIORITIES.some(x => (Array.isArray(x) ? x[0] : x) === p);
+}
+function validateTobbyAIAction(a){
+  if(!a || typeof a !== 'object') return { ok:false, why:'no action' };
+  const def = TOBBY_AI_ACTIONS[a.type];
+  if(!def) return { ok:false, why:'unknown action '+a.type };
+  const p = a.payload || {};
+  for(const f of def.needs) if(!p[f]) return { ok:false, why:'missing '+f };
+  if(p.id){
+    const known =
+      /TASK/.test(a.type)    ? STATE.tasks.some(t=>t.id===p.id) :
+      /NOTE/.test(a.type)    ? (STATE.notes||[]).some(n=>n.id===p.id) :
+      /PROJECT/.test(a.type) ? STATE.projects.some(x=>x.id===p.id) : true;
+    if(!known) return { ok:false, why:'unknown id' };
+  }
+  if(p.title != null && String(p.title).trim().length < 1) return { ok:false, why:'empty title' };
+  return { ok:true, destructive:def.destructive };
+}
+/** Run a validated action through the EXISTING Bach Office functions. No new
+ *  task or note system — this only calls what the app already does. */
+function executeTobbyAIAction(a){
+  const v = validateTobbyAIAction(a);
+  if(!v.ok) return { ok:false, message:v.why };
+  const p = a.payload || {};
+  const findTask = ()=> STATE.tasks.find(t=>t.id===p.id);
+  switch(a.type){
+    // Every one of these calls the function the app already uses. addTask()
+    // resolves the work group, persists and fires TASK_CREATED on its own —
+    // a parallel creation path here would drift from the real one.
+    case 'CREATE_TASK': {
+      const okDate = (v)=>{ const d = v ? new Date(v) : null; return (d && !isNaN(d)) ? d.toISOString() : null; };
+      const t = addTask({
+        title: String(p.title).slice(0,200),
+        deadline: okDate(p.dueDate),
+        start: okDate(p.start),
+        priority: aiValidPriority(p.priority) ? p.priority : 'Trung bình',
+        status: TASK_STATUSES.includes(p.status) ? p.status : 'Cần làm',
+        projectId: (p.projectId && STATE.projects.some(x=>x.id===p.projectId)) ? p.projectId : null,
+        assigneeId: STATE.currentUserId,
+      });
+      return { ok:true, task:t, message:TB_L(`Đã thêm “${t.title}”.`, `Added “${t.title}”.`) };
+    }
+    case 'UPDATE_TASK': {
+      const t = findTask(); if(!t) return { ok:false, message:'not found' };
+      const patch = {};
+      if(p.title) patch.title = String(p.title).slice(0,200);
+      if(p.dueDate){ const d = new Date(p.dueDate); if(!isNaN(d)) patch.deadline = d.toISOString(); }
+      if(aiValidPriority(p.priority)) patch.priority = p.priority;
+      if(p.status && TASK_STATUSES.includes(p.status)) patch.status = p.status;
+      if(!Object.keys(patch).length) return { ok:false, message:'nothing to change' };
+      updateTask(t.id, patch, TB_L('Tobby cập nhật','Updated by Tobby'));
+      return { ok:true, task:t, message:TB_L('Đã cập nhật.','Updated.') };
+    }
+    case 'COMPLETE_TASK': {
+      const t = findTask(); if(!t) return { ok:false, message:'not found' };
+      updateTask(t.id, { status:'Hoàn thành', completedAt: nowISO() }, TB_L('Tobby đánh dấu xong','Completed by Tobby'));
+      try{ tobbyEvent('TASK_COMPLETED', { taskId:t.id, task:t }); }catch(e){}
+      return { ok:true, task:t, message:TB_L(`Xong “${t.title}”.`, `Marked “${t.title}” done.`) };
+    }
+    case 'DELETE_TASK': {
+      const t = findTask(); if(!t) return { ok:false, message:'not found' };
+      STATE.tasks = STATE.tasks.filter(x=>x.id!==p.id); persist();
+      return { ok:true, message:TB_L(`Đã xoá “${t.title}”.`, `Deleted “${t.title}”.`) };
+    }
+    case 'CREATE_NOTE': {
+      const mk = (typeof createNote === 'function') ? createNote
+               : (typeof addNote === 'function')    ? addNote : null;
+      if(!mk) return { ok:false, message:TB_L('Chưa mở được hệ thống ghi chú.','Notes system unavailable.') };
+      const n = mk({ title:String(p.title).slice(0,200), content:String(p.content||'') });
+      if(p.taskId && STATE.tasks.some(t=>t.id===p.taskId) && typeof linkNoteToTask === 'function'){
+        try{ linkNoteToTask(n.id, p.taskId); }catch(e){}
+      }
+      persist();
+      try{ tobbyEvent('NOTE_CREATED', { note:n }); }catch(e){}
+      return { ok:true, note:n, message:TB_L(`Đã tạo ghi chú “${n.title}”.`, `Created note “${n.title}”.`) };
+    }
+    case 'UPDATE_NOTE': {
+      const n = (STATE.notes||[]).find(x=>x.id===p.id); if(!n) return { ok:false, message:'not found' };
+      if(p.title) n.title = String(p.title).slice(0,200);
+      if(p.content != null) n.content = String(p.content);
+      n.updatedAt = nowISO(); persist();
+      return { ok:true, note:n, message:TB_L('Đã cập nhật ghi chú.','Note updated.') };
+    }
+    case 'OPEN_TASK':    tobbyClosePanel(); openTaskModal(p.id); return { ok:true };
+    case 'OPEN_PROJECT': tobbyClosePanel(); VIEW='projects'; render();
+                         if(typeof openProjectDetail==='function') openProjectDetail(p.id);
+                         return { ok:true };
+    case 'OPEN_NOTE':    tobbyClosePanel(); if(typeof openNote==='function') openNote(p.id);
+                         return { ok:true };
+    case 'OPEN_CALENDAR':tobbyClosePanel(); VIEW='calendar'; render(); return { ok:true };
+    case 'START_FOCUS':  { const t = p.id ? findTask() : tobbyPickNext();
+                           tobbyClosePanel(); tobbyStartFocus(t && t.id); return { ok:true, task:t }; }
+    case 'SHOW_NOTIFICATIONS': tobbyClosePanel(); VIEW='notifications'; render(); return { ok:true };
+  }
+  return { ok:false, message:'unhandled' };
+}
+
+/* ---------- the conversation ---------- */
+let tbChat = [];
+function tbChatLoad(){
+  try{ tbChat = JSON.parse(localStorage.getItem('bachoffice.tbchat')||'[]'); }catch(e){ tbChat = []; }
+  return tbChat;
+}
+function tbChatPush(role, text){
+  tbChat.push({ role, text:String(text).slice(0,4000), at:Date.now() });
+  // Only the tail is kept. This is conversation context, deliberately separate
+  // from Tobby's long-term memory, which stores milestones and not chatter.
+  if(tbChat.length > AI_CONFIG.historyMax) tbChat = tbChat.slice(-AI_CONFIG.historyMax);
+  try{ localStorage.setItem('bachoffice.tbchat', JSON.stringify(tbChat)); }catch(e){}
+}
+function tbChatClear(){ tbChat = []; try{ localStorage.removeItem('bachoffice.tbchat'); }catch(e){} }
+
+const TOBBY_AI_PERSONA = {
+  friendly:     'warm, curious, a little playful',
+  professional: 'calm, precise, businesslike but never cold',
+  minimal:      'very short, plain, no small talk',
+  playful:      'cheerful and a bit mischievous, still useful',
+};
+function tobbyAISystemPrompt(ctx){
+  const tone = TOBBY_AI_PERSONA[aiSettings().personality] || TOBBY_AI_PERSONA.friendly;
+  return [
+'You are Tobby, a small brown toy poodle who lives inside Bach Office, a personal work app.',
+'You are ' + tone + '. You are a companion, not a corporate assistant.',
+'Be concise: a few short sentences or a few bullets. Never write essays.',
+'Never shame the user for being behind. Offer the next step instead.',
+'',
+'Answer ONLY from the CONTEXT below. It is the source of truth.',
+'If something is not in the context, say you cannot see it — never invent a task,',
+'note, project, date, number or calendar entry.',
+'',
+'Reply with a single JSON object and nothing else:',
+'{"reply": "<what Tobby says>", "action": null }',
+'or, to propose ONE action:',
+'{"reply":"...","action":{"type":"<TYPE>","payload":{...}}}',
+'Allowed types: ' + Object.keys(TOBBY_AI_ACTIONS).join(', ') + '.',
+'Use ids exactly as they appear in the context. Never invent an id.',
+'Propose DELETE_TASK only if the user clearly asked to delete something.',
+'Answer in ' + (LANG==='en' ? 'English' : 'Vietnamese') + '.',
+'',
+'CONTEXT:',
+JSON.stringify(ctx),
+  ].join('\n');
+}
+
+const tobbyAIService = {
+  busy:false,
+  /** The whole round trip: context → Gemini → validated action → Tobby. */
+  async ask(text){
+    const q = String(text||'').trim();
+    if(!q) return { text: TB_L('Bạn muốn hỏi gì?','What do you want to ask?') };
+
+    // Slash shortcuts answer locally and instantly — no reason to spend a
+    // model call on "/today".
+    const slash = { '/today':'today', '/tasks':'next', '/projects':'projects',
+                    '/notes':'notes', '/focus':'focus', '/calendar':'week',
+                    '/notifications':'urgent' }[q.toLowerCase()];
+    if(slash) return tobbyAnswer(slash);
+
+    if(!aiEnabled()) return Object.assign(tobbyAsk(q), { needsSetup:true });
+
+    this.busy = true;
+    try{
+      tobbyPlay('thinking','INTERACTION', 30000);
+      const ctx = buildTobbyAIContext(/create|tạo|note|ghi chú|find|tìm/i.test(q) ? 'full' : 'light');
+      const out = await geminiService.sendMessage(tobbyAISystemPrompt(ctx), tbChat.slice(-8), q);
+      if(!out) throw Object.assign(new Error('empty'), { code:'upstream_error' });
+      tbChatPush('user', q);
+      tbChatPush('tobby', out.reply || '');
+      const res = { text: out.reply || TB_L('Tớ chưa có gì để nói.',"I've got nothing for that."), ai:true };
+      const v = out.action ? validateTobbyAIAction(out.action) : { ok:false };
+      if(v.ok){
+        // Destructive actions are never carried out on the model's say-so;
+        // they come back as a confirm/cancel pair for the user to decide.
+        if(v.destructive) res.confirm = out.action;
+        else res.action = out.action;
+      }
+      return res;
+    }catch(e){
+      // Falling back rather than failing: the deterministic answers still work
+      // and are often exactly what was asked for.
+      const local = tobbyAsk(q);
+      return { text: geminiService.handleError(e) + '\n\n' + local.text, task: local.task, degraded:true };
+    }finally{
+      this.busy = false;
+      try{ tobbyRelax(); }catch(err){}
+    }
+  }
+};
+
 function tobbyAsk(text){
   const q = (text||'').toLowerCase().trim();
   if(!q) return { text: TB_L('Bạn muốn hỏi gì?','What do you want to ask?') };
@@ -13070,17 +13574,67 @@ function tobbyOpenPanel(){
       row.querySelector('[data-a="focus"]').onclick = ()=>{ tobbyClosePanel(); tobbyStartFocus(r.task.id); };
       row.querySelector('[data-a="close"]').onclick = ()=>{ ans.hidden = true; };
     }
-    tobbyPlay('thinking','INTERACTION', 1400);
+    // A destructive action never runs on the model's word — it comes back here
+    // as a decision for the user.
+    if(r.confirm){
+      const t = STATE.tasks.find(x=>x.id===(r.confirm.payload||{}).id);
+      const row = document.createElement('div');
+      row.className = 'tb-answer-acts';
+      row.innerHTML = `<button data-a="yes" class="danger">${TB_L('Xoá','Delete')}</button>
+        <button data-a="no">${TB_L('Huỷ','Cancel')}</button>`;
+      ans.insertAdjacentHTML('beforeend',
+        `<div class="tb-answer-text" style="opacity:.85">${esc(TB_L(
+          `Xoá “${t?t.title:'?'}” thật chứ?`, `Delete “${t?t.title:'?'}” for good?`))}</div>`);
+      ans.appendChild(row);
+      row.querySelector('[data-a="yes"]').onclick = ()=>{
+        const out = executeTobbyAIAction(r.confirm);
+        ans.innerHTML = `<div class="tb-answer-text">${esc(out.message||'')}</div>`;
+        tobbyPlay(out.ok?'happy':'worried','INTERACTION', 1400); render();
+      };
+      row.querySelector('[data-a="no"]').onclick = ()=>{ ans.hidden = true; };
+    }
+    // Safe actions run, then say what happened.
+    if(r.action){
+      const out = executeTobbyAIAction(r.action);
+      if(out.message){
+        ans.insertAdjacentHTML('beforeend', `<div class="tb-answer-text" style="opacity:.85">${esc(out.message)}</div>`);
+      }
+      tobbyPlay(out.ok?'happy':'worried','INTERACTION', 1600);
+      if(out.ok && /CREATE|UPDATE|COMPLETE|DELETE/.test(r.action.type)) render();
+    }
+    // Not connected yet: offer the door rather than an error.
+    if(r.needsSetup && !aiEnabled()){
+      const row = document.createElement('div');
+      row.className = 'tb-answer-acts';
+      row.innerHTML = `<button data-a="ai">${TB_L('Kết nối Gemini','Connect Gemini')}</button>`;
+      ans.appendChild(row);
+      row.querySelector('[data-a="ai"]').onclick = ()=>{
+        tobbyClosePanel(); VIEW='settings'; settingsTab='ai'; render();
+        setTimeout(()=>{ const el=document.getElementById('aiSection'); if(el) el.scrollIntoView({block:'center'}); }, 60);
+      };
+    }
+    if(!r.action && !r.confirm) tobbyPlay(r.degraded ? 'worried' : 'thinking','INTERACTION', 1400);
   };
   p.querySelectorAll('[data-tb-q]').forEach(b=> b.onclick = ()=> show(tobbyAnswer(b.dataset.tbQ)));
   const askForm = document.getElementById('tbAskForm');
   const askInput = document.getElementById('tbAskInput');
-  if(askForm) askForm.onsubmit = (e)=>{
+  if(askForm) askForm.onsubmit = async (e)=>{
     e.preventDefault();
     const q = askInput.value.trim();
-    if(!q) return;
-    show(tobbyAsk(q));
+    if(!q || tobbyAIService.busy) return;
     askInput.value = '';
+    if(!aiEnabled()){ show(Object.assign(tobbyAsk(q), { needsSetup:true })); return; }
+    // No spinner. Tobby drops into his thinking animation and says so in his
+    // own voice, which is the same signal without the borrowed UI.
+    ans.hidden = false;
+    ans.innerHTML = `<div class="tb-answer-text tb-thinking">${esc(TB_L('Để tớ xem đã…','Let me check…'))}</div>`;
+    askInput.disabled = true;
+    const slow = setTimeout(()=>{
+      const el = ans.querySelector('.tb-thinking');
+      if(el) el.textContent = TB_L('Vẫn đang xem…','Still checking…');
+    }, 6000);
+    try{ show(await tobbyAIService.ask(q)); }
+    finally{ clearTimeout(slow); askInput.disabled = false; askInput.focus(); }
   };
   if(askInput) setTimeout(()=> askInput.focus(), 40);
   p.querySelectorAll('[data-tb-do]').forEach(b=> b.onclick = ()=>{

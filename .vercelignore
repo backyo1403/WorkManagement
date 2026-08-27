@@ -5,6 +5,9 @@
 src
 prisma
 node_modules
+# NOTE: api/ is deliberately NOT ignored — /api/gemini.js deploys as a Vercel
+# serverless function and is what keeps the production Gemini key off the
+# client entirely.
 .next
 package.json
 package-lock.json
