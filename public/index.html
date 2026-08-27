@@ -1336,6 +1336,21 @@ a{color:inherit;}
   animation:wxSweep linear infinite;}
 @keyframes wxSweep{ to{ transform:translateX(calc(100vw + 280px)); } }
 
+/* The voxel sun/moon from the GLB. Same corner the CSS one occupied, same
+   fixed anchoring, so it holds still while the page scrolls under it. Its
+   `top` and size are set per hour and per moon phase from script. */
+.wx-body{
+  position:fixed; top:12px; right:38px; width:34px; height:34px; z-index:3;
+  pointer-events:none;
+  transition:top .8s ease, width .8s ease, height .8s ease, filter .8s ease;
+}
+.wx-body canvas{display:block; width:100%; height:100%;}
+/* Once the model is drawing, the CSS bodies are redundant — but they stay in
+   the markup so a WebGL failure still leaves a sun in the sky. */
+.weather-layer.has-3d-body .wx-sun,
+.weather-layer.has-3d-body .wx-moon{display:none;}
+@media (max-width:699px){ .wx-body{right:14px; transform:scale(.82); transform-origin:100% 0;} }
+
 /* clear sky — a stepped pixel sun: a square core, chamfered corners, and a
    soft corona behind it */
 /* Fixed, not absolute, and pinned near the top edge: it is the sun, so it
@@ -5058,6 +5073,243 @@ function locateCoarse(){
     );
   });
 }
+/* =========================================================
+   VOXEL SKY BODY — the sun and moon, from voxel-sun.glb
+   ---------------------------------------------------------
+   A note on the asset, because it shapes the whole design: despite its name,
+   voxel-sun.glb contains NO sun. Its one child is `moon_crescent`, built from
+   four meshes on four materials — moon_white, moon_grey, moon_crater and
+   moon_shadow. The lit voxels occupy the left limb (x −0.52…+0.44) and the
+   shadow voxels the right (−0.20…+0.52); together they tile one sphere.
+
+   So phase is a MATERIAL problem here, not a geometry one. Relighting
+   moon_shadow fills the disc out to a full moon; leaving it dark gives the
+   crescent as authored; and turning the whole model 180° about Y swaps which
+   limb is lit, which is exactly the difference between waxing and waning.
+
+   The sun is that same voxel sphere lit and tinted warm. There is no separate
+   sun geometry to load, so this is the honest maximum from the file supplied —
+   the moment a real sun mesh exists it drops straight into setSun().
+   ========================================================= */
+const SKY_GLB_URL = 'assets/sky/voxel-sun.glb';
+let tbSkyFrame = 0, tbSkyHour = -1;
+const SkyBody = {
+  THREE:null, renderer:null, scene:null, camera:null, root:null,
+  mats:{}, base:{}, ready:false, loading:false, failed:false,
+  mode:null, spin:0, raf:0,
+
+  async load(container){
+    if(this.ready || this.loading || this.failed) return;
+    this.loading = true;
+    try{
+      const THREE = await import('three');
+      const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
+      this.THREE = THREE;
+      const gltf = await new Promise((res, rej)=> new GLTFLoader().load(SKY_GLB_URL, res, undefined, rej));
+
+      this.scene  = new THREE.Scene();
+      this.camera = new THREE.PerspectiveCamera(30, 1, 0.1, 20);
+      this.camera.position.set(0, 0.35, 3.4);
+      this.camera.lookAt(0, 0, 0);
+
+      this.root = gltf.scene;
+      this.root.scale.setScalar(1.55);
+      this.scene.add(this.root);
+
+      // Each material is cloned and its authored colour banked, so switching
+      // between sun and moon is a restore rather than a guess at what it was.
+      this.root.traverse(o=>{
+        if(!o.isMesh || !o.material) return;
+        o.material = o.material.clone();
+        const m = o.material, n = m.name || o.name;
+        this.mats[n] = m;
+        this.base[n] = {
+          color: m.color ? m.color.clone() : null,
+          emissive: m.emissive ? m.emissive.clone() : null,
+          emissiveIntensity: m.emissiveIntensity != null ? m.emissiveIntensity : 1
+        };
+      });
+
+      this.scene.add(new THREE.AmbientLight(0xffffff, 1.1));
+      this.key = new THREE.DirectionalLight(0xffffff, 2.0);
+      this.key.position.set(-2, 1.4, 2.2);
+      this.scene.add(this.key);
+
+      this.renderer = new THREE.WebGLRenderer({ alpha:true, antialias:true });
+      this.renderer.setClearAlpha(0);
+      this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
+      this.ready = true; this.loading = false;
+      this.attach(container);
+      this.apply();
+    }catch(e){
+      this.failed = true; this.loading = false;   // the CSS sun/moon stands in
+    }
+  },
+
+  attach(container){
+    if(!this.ready || !container) return;
+    this.container = container;
+    container.appendChild(this.renderer.domElement);
+    const s = container.getBoundingClientRect();
+    const px = Math.max(32, Math.round(s.width||44));
+    this.renderer.setSize(px, px, false);
+    Object.assign(this.renderer.domElement.style, {width:'100%', height:'100%', display:'block'});
+  },
+
+  /** Tint every material warm and self-lit. The whole sphere becomes the
+   *  light source, which is what makes a voxel ball read as a sun. */
+  setSun(hour){
+    if(!this.ready) return;
+    const T = this.THREE;
+    // Versions across the day: colour, glow and how high it sits. Dawn and
+    // dusk are low, deep and dim; midday is high, pale and fierce.
+    const V = hour < 6  ? { c:0xFF6B3A, e:0.55, top:26, size:30 }
+            : hour < 8  ? { c:0xFF8A3D, e:0.80, top:22, size:34 }
+            : hour < 11 ? { c:0xFFB247, e:1.05, top:16, size:34 }
+            : hour < 14 ? { c:0xFFE070, e:1.35, top:10, size:38 }
+            : hour < 16 ? { c:0xFFC85E, e:1.15, top:14, size:36 }
+            : hour < 18 ? { c:0xFF9F45, e:0.90, top:20, size:34 }
+            :             { c:0xFF6B3A, e:0.60, top:26, size:30 };
+    Object.keys(this.mats).forEach(n=>{
+      const m = this.mats[n];
+      // The crater and shadow voxels keep a little relative darkness so the
+      // sphere still has facets instead of flattening into a flat disc.
+      const dim = /crater|shadow/.test(n) ? 0.72 : 1;
+      if(m.color) m.color.setHex(V.c).multiplyScalar(dim);
+      if(m.emissive){ m.emissive.setHex(V.c); m.emissiveIntensity = V.e * dim; }
+    });
+    this.mode = 'sun';
+    this.baseYaw = 0;
+    this.root.rotation.y = 0;
+    this.root.rotation.z = 0;
+    this.style(V.top, V.size, 'rgba(255,196,60,.30)');
+    this.render();
+  },
+
+  /** Restore the authored moon, then decide the phase. */
+  setMoon(phase){
+    if(!this.ready) return;
+    Object.keys(this.mats).forEach(n=>{
+      const m = this.mats[n], b = this.base[n];
+      if(!b) return;
+      if(b.color && m.color) m.color.copy(b.color);
+      if(b.emissive && m.emissive){ m.emissive.copy(b.emissive); m.emissiveIntensity = b.emissiveIntensity; }
+    });
+    const shadow = this.mats['moon_shadow'];
+    const lit    = this.base['moon_white'];
+    if(phase.full && shadow && lit){
+      // Light the shadowed limb and the crescent becomes a full disc. This is
+      // the whole reason the phase is done in materials: the file has one
+      // mesh set, and it already covers the entire sphere.
+      if(shadow.color) shadow.color.copy(lit.color).multiplyScalar(0.93);
+      if(shadow.emissive){ shadow.emissive.copy(lit.emissive); shadow.emissiveIntensity = 0.9; }
+    }
+    // Waning moons are lit from the other limb. Flipped about the VIEW axis,
+    // not about Y: a half-turn on Y swings the unmodelled back of the sphere
+    // into shot and reads as a gibbous — measured rgb(173,180,191) against the
+    // waxing crescent's rgb(60,62,68). Spinning about Z keeps the same face
+    // toward the camera and simply moves the lit limb across, which is what
+    // waxing-to-waning actually looks like. Negative scale would mirror it too
+    // but inverts the winding and lights the model inside-out.
+    this.baseYaw = 0;
+    this.root.rotation.y = 0;
+    this.root.rotation.z = phase.waning ? Math.PI : 0;
+    this.mode = 'moon';
+    this.style(14, phase.full ? 38 : 34,
+      phase.full ? 'rgba(150,190,255,.30)' : 'rgba(150,190,255,.20)');
+    this.render();
+  },
+
+  style(top, size, glow){
+    if(!this.container) return;
+    Object.assign(this.container.style, {
+      top: top+'px', width: size+'px', height: size+'px',
+      filter: `drop-shadow(0 0 ${Math.round(size*0.45)}px ${glow})`
+    });
+    if(this.renderer) this.renderer.setSize(size, size, false);
+  },
+
+  /** Re-read the clock and paint whichever body belongs in the sky. */
+  apply(){
+    if(!this.ready) return;
+    const h = new Date().getHours();
+    tbSkyHour = h;
+    const day = h >= 6 && h < 18;
+    if(day) this.setSun(h); else this.setMoon(moonPhaseToday());
+  },
+  /** Cheap enough to poll: re-skins only when the hour actually rolls over, so
+   *  the sun reddens into the evening on its own without a reload. */
+  applyIfHourChanged(){
+    if(this.ready && new Date().getHours() !== tbSkyHour) this.apply();
+  },
+
+  render(){ if(this.ready) this.renderer.render(this.scene, this.camera); },
+
+  /** A very slow turn, and only while it is on screen. A sky body does not
+   *  need 60fps; this costs one small draw every other frame at most. */
+  tick(){
+    if(!this.ready || document.hidden || !this.container || !this.container.isConnected) return;
+    if(tbReduceMotion()) return;
+    this.spin += 0.0016;
+    // Sways around whichever heading the phase set, never replaces it — a
+    // waning moon must keep facing the way it was turned.
+    this.root.rotation.y = (this.baseYaw || 0) + Math.sin(this.spin) * 0.18;
+    this.render();
+  }
+};
+
+/* =========================================================
+   ÂM LỊCH — Vietnamese lunar date
+   Hồ Ngọc Đức's algorithm, the standard one for the Vietnamese calendar.
+   Needed because the brief asks for a full moon on lunar 13–17, and "days
+   since some new moon" drifts: the synodic month is 29.53 days, so a fixed
+   average is a day out within a year and two days out within three. This
+   computes the actual new-moon instant and localises it to UTC+7, which is
+   what decides the date on a Vietnamese calendar.
+   ========================================================= */
+function lunarJD(dd, mm, yy){
+  const a = Math.floor((14 - mm) / 12), y = yy + 4800 - a, m = mm + 12*a - 3;
+  let jd = dd + Math.floor((153*m + 2)/5) + 365*y + Math.floor(y/4) - Math.floor(y/100) + Math.floor(y/400) - 32045;
+  if(jd < 2299161) jd = dd + Math.floor((153*m + 2)/5) + 365*y + Math.floor(y/4) - 32083;
+  return jd;
+}
+/** Julian day of the k-th new moon since 1900-01, in the given time zone. */
+function lunarNewMoonDay(k, tz){
+  const T = k/1236.85, T2 = T*T, T3 = T2*T, dr = Math.PI/180;
+  let jd1 = 2415020.75933 + 29.53058868*k + 0.0001178*T2 - 0.000000155*T3;
+  jd1 += 0.00033 * Math.sin((166.56 + 132.87*T - 0.009173*T2) * dr);
+  const M   = 359.2242 + 29.10535608*k - 0.0000333*T2 - 0.00000347*T3;
+  const Mpr = 306.0253 + 385.81691806*k + 0.0107306*T2 + 0.00001236*T3;
+  const F   = 21.2964 + 390.67050646*k - 0.0016528*T2 - 0.00000239*T3;
+  let c1 = (0.1734 - 0.000393*T)*Math.sin(M*dr) + 0.0021*Math.sin(2*dr*M);
+  c1 = c1 - 0.4068*Math.sin(Mpr*dr) + 0.0161*Math.sin(dr*2*Mpr);
+  c1 = c1 - 0.0004*Math.sin(dr*3*Mpr);
+  c1 = c1 + 0.0104*Math.sin(dr*2*F) - 0.0051*Math.sin(dr*(M+Mpr));
+  c1 = c1 - 0.0074*Math.sin(dr*(M-Mpr)) + 0.0004*Math.sin(dr*(2*F+M));
+  c1 = c1 - 0.0004*Math.sin(dr*(2*F-M)) - 0.0006*Math.sin(dr*(2*F+Mpr));
+  c1 = c1 + 0.0010*Math.sin(dr*(2*F-Mpr)) + 0.0005*Math.sin(dr*(2*Mpr+M));
+  const deltat = T < -11
+    ? 0.001 + 0.000839*T + 0.0002261*T2 - 0.00000845*T3 - 0.000000081*T*T3
+    : -0.000278 + 0.000265*T + 0.000262*T2;
+  return Math.floor(jd1 + c1 - deltat + 0.5 + tz/24);
+}
+/** Day of the lunar month, 1–30. Day 1 is the new moon; ~15 is the full moon. */
+function lunarDayOfMonth(date){
+  const d  = date || new Date();
+  const tz = 7;                                  // Vietnam, and the calendar the brief means
+  const jd = lunarJD(d.getDate(), d.getMonth()+1, d.getFullYear());
+  const k  = Math.floor((jd - 2415021.076998695) / 29.530588853);
+  let nm = lunarNewMoonDay(k + 1, tz);
+  if(nm > jd) nm = lunarNewMoonDay(k, tz);
+  return jd - nm + 1;
+}
+/** The brief's rule: 13–17 is a full moon, everything else a crescent, and the
+ *  crescent leans the other way once past full — waxing before, waning after. */
+function moonPhaseToday(date){
+  const day = lunarDayOfMonth(date);
+  return { day, full: day >= 13 && day <= 17, waning: day > 17 || day < 1 };
+}
+
 /** Builds the particle layer for a scene. Called only when the scene changes. */
 function applyWeatherScene(kind){
   let layer = document.getElementById('weatherLayer');
@@ -5126,6 +5378,9 @@ function applyWeatherScene(kind){
       width:${rnd(70,220).toFixed(0)}px; opacity:${rnd(.22,.5).toFixed(2)};"></i>`);
   }
   if(kind==='clear'){
+    // The voxel body goes in front; the CSS sun stays behind it as the
+    // fallback for no-WebGL and for the seconds before the GLB arrives.
+    bits.push(`<div class="wx-body" id="wxBody"></div>`);
     bits.push(`<i class="wx-sun"></i>`);
     clouds(2, 0.18);
     many(20, ()=>`<i class="wx-mote" style="left:${rnd(0,100).toFixed(1)}%;
@@ -5133,6 +5388,7 @@ function applyWeatherScene(kind){
       animation-delay:-${rnd(0,20).toFixed(1)}s; opacity:${rnd(.2,.45).toFixed(2)};"></i>`);
   }
   if(kind==='night'){
+    bits.push(`<div class="wx-body" id="wxBody"></div>`);
     bits.push(`<i class="wx-moon"></i>`);
     many(46, ()=>{ const s = Math.round(rnd(2,4));
       return `<i class="wx-star" style="left:${rnd(0,100).toFixed(1)}%;
@@ -5140,6 +5396,17 @@ function applyWeatherScene(kind){
       animation-delay:-${rnd(0,5).toFixed(1)}s; width:${s}px; height:${s}px;"></i>`; });
   }
   layer.innerHTML = `<div class="wx-tint"></div>${bits.join('')}`;
+
+  // Hand the voxel sun/moon its slot. Loaded once, then re-attached on every
+  // scene change — the layer's innerHTML was just replaced, so the canvas from
+  // the previous scene is gone even though the renderer behind it is fine.
+  const slot = document.getElementById('wxBody');
+  if(slot && !SkyBody.failed){
+    if(SkyBody.ready){ SkyBody.attach(slot); SkyBody.apply(); }
+    else SkyBody.load(slot);
+    // Once the model is up it IS the sun, so the CSS stand-in steps aside.
+    if(SkyBody.ready) layer.classList.add('has-3d-body');
+  }
 }
 /** Small readout for the settings panel and the dashboard clock area. */
 function weatherLabel(){
@@ -12118,6 +12385,12 @@ function tobbyLoop(ts){
   // from its own rAF, so there is never a second animation loop running — and
   // when this one stops for a hidden tab, the GPU work stops with it.
   if(Tobby3D.ready) Tobby3D.update(dt);
+  // The sky body rides the same loop, at a third of the rate. It is a sun: it
+  // does not need 60fps, and this way it costs nothing on a hidden tab either.
+  if(SkyBody.ready && (tbSkyFrame = (tbSkyFrame+1) % 3) === 0){
+    SkyBody.applyIfHourChanged();   // an integer compare; only acts on rollover
+    SkyBody.tick();
+  }
   if(tbAnim.visible && !document.hidden) tbAnim.raf = requestAnimationFrame(tobbyLoop);
 }
 function tobbyStartLoop(){
