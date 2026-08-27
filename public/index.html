@@ -409,6 +409,10 @@ a{color:inherit;}
 .status-Dang-lam{background:#FDF3D0; color:#8A6100;}
 :root[data-theme="dark"] .status-Dang-lam{background:rgba(243,196,53,.20); color:#F3C435;}
 .status-Hoan-thanh{background:var(--success-soft); color:var(--success);}
+/* Pink, and only ever pink — an event is not a stage of work, so it does not
+   borrow the to-do/doing/done palette. */
+.status-Su-kien{background:#FCE7F3; color:#BE185D;}
+:root[data-theme="dark"] .status-Su-kien{background:rgba(236,72,153,.20); color:#F9A8D4;}
 
 .hover-card{display:none; position:absolute; left:0; top:100%; margin-top:6px; width:230px; background:var(--surface); border:1px solid var(--border); border-radius:12px; box-shadow:var(--shadow-lg); padding:12px; z-index:40; cursor:default; max-height:min(340px, 70vh); overflow-y:auto;}
 /* flipped variants keep the card on-screen near the viewport edges */
@@ -815,6 +819,10 @@ a{color:inherit;}
    showed a row of faces and no indication of what the task was. On a card this
    size the one thing worth the space is what it is; who it belongs to is a
    hover or a click away. */
+/* Events read as one continuous ribbon rather than a work card: no progress
+   bar to fill in, and a dashed edge on whichever end was cut by midnight. */
+.tt-block.is-event .tt-progress{display:none;}
+.tt-block.is-event{border:1.5px solid rgba(255,255,255,.35);}
 .tt-block.is-compact{padding:3px 8px 7px;}
 .tt-block.is-compact .tt-head{display:none;}
 .tt-block.is-compact .tt-block-title{
@@ -2825,7 +2833,32 @@ const DEPT_ICONS = ["🏢","💻","📣","💰","🎯","🛠️","📦","🎨","
 const WORKFLOW_ICONS = ["📁","🚀","🎨","⚙️","🔬","🎧","📊","🧩"];
 const PROJECT_ICONS = ["🛒","📱","📈","🖥️","🎓","🧾","🌐","🏗️","📦","🎯"];
 const WORKFLOW_COLORS = ["#2563EB","#7C3AED","#EC4899","#F59E0B","#16A34A","#0EA5E9","#EF4444","#64748B"];
-const TASK_STATUSES = ["Cần làm","Đang làm","Hoàn thành"];
+/** "Sự kiện" is a status, not a fourth kind of record, so it inherits the whole
+ *  task machine — filters, kanban, search, projects — for free. What makes it
+ *  different is how its dates are read: a task's `start` is when you mean to
+ *  begin and `deadline` is when it is due, but an EVENT's start and deadline
+ *  are the two ends of the thing itself. See eventRange(). */
+const TASK_STATUS_EVENT = "Sự kiện";
+const TASK_STATUSES = ["Cần làm","Đang làm","Hoàn thành",TASK_STATUS_EVENT];
+function isEvent(t){ return !!t && t.status === TASK_STATUS_EVENT; }
+/** The span an event actually occupies. Falls back to its estimate when no
+ *  deadline was given, so a half-filled event still draws something sane. */
+function eventRange(t){
+  if(!t || !t.start) return null;
+  const s = new Date(t.start);
+  if(isNaN(s)) return null;
+  let e = t.deadline ? new Date(t.deadline) : null;
+  if(!e || isNaN(e) || e <= s) e = new Date(s.getTime() + Math.max(0.5, t.estimateHours || 1)*3600000);
+  return { start:s, end:e };
+}
+/** Does this event touch the given day at all? */
+function eventCoversDay(t, d){
+  const r = eventRange(t);
+  if(!r) return false;
+  const a = new Date(d); a.setHours(0,0,0,0);
+  const b = new Date(a);  b.setDate(b.getDate()+1);
+  return r.start < b && r.end > a;
+}
 const TASK_PRIORITIES = [["ASAP","ASAP"],["Cao","CAO"],["Trung bình","TB"],["Thấp","THẤP"]];
 /* Seven-step red scale: the nearer the deadline, the deeper the red. */
 const DUE_SCALE = [
@@ -2865,6 +2898,7 @@ const DICT_EN = {
   "Làm việc thông minh hơn":"Work smarter",
   // statuses / priorities
   "Cần làm":"To do", "Đang làm":"In progress", "Hoàn thành":"Done", "Quá hạn":"Overdue",
+  "Sự kiện":"Event", "Bắt đầu sự kiện":"Event starts", "Kết thúc sự kiện":"Event ends",
   "Cao":"High", "Trung bình":"Medium", "Thấp":"Low", "CAO":"HIGH", "TB":"MED", "THẤP":"LOW",
   "Chưa bắt đầu":"Not started", "Đang thực hiện":"In progress", "Hoàn tất":"Completed",
   "Chủ sở hữu":"Owner", "Trưởng nhóm":"Team lead",
@@ -3253,7 +3287,9 @@ function ymdLocal(d){
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
 function dayPart(){ const h=new Date().getHours(); return h<12?"sáng":h<18?"chiều":"tối"; }
-function isOverdue(t){ return t.deadline && new Date(t.deadline) < new Date() && t.status!=="Hoàn thành" && !t.archived; }
+/* An event whose end has passed is finished, not late — its deadline is when
+   it stopped happening, not a promise anyone broke. */
+function isOverdue(t){ return t.deadline && new Date(t.deadline) < new Date() && t.status!=="Hoàn thành" && !isEvent(t) && !t.archived; }
 function isSameDay(a,b){ if(!a) return false; const d=new Date(a), n=b?new Date(b):new Date(); return d.toDateString()===n.toDateString(); }
 function statusClass(s){ return "status-" + s.replace(/\s+/g,'-').replace('ầ','a').replace('à','a').replace('à','a'); }
 
@@ -7882,7 +7918,12 @@ function projectTaskRowHtml(t){
   ${subtaskHoverCardHtml(t)}
   </div>`;
 }
-function statusClassFor(s){ return s==='Cần làm'?'status-Can-lam':s==='Đang làm'?'status-Dang-lam':'status-Hoan-thanh'; }
+function statusClassFor(s){
+  return s==='Cần làm' ? 'status-Can-lam'
+       : s==='Đang làm' ? 'status-Dang-lam'
+       : s===TASK_STATUS_EVENT ? 'status-Su-kien'
+       : 'status-Hoan-thanh';
+}
 function openProjectModal(id){
   const existing = id? projectById(id): null;
   // One draft object holds every field, so redrawing (icon/colour/hashtag)
@@ -8337,8 +8378,13 @@ function openTaskModal(id, prefill){
         <div class="field"><label>Độ ưu tiên</label><select id="tm_priority">${TASK_PRIORITIES.map(([full])=>`<option value="${esc(full)}" ${t.priority===full?"selected":""}>${full}</option>`).join("")}</select></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Hạn chót</label><input id="tm_deadline" type="datetime-local" value="${toLocalInput(t.deadline)}"></div>
-        <div class="field"><label>Bắt đầu</label><input id="tm_start" type="datetime-local" value="${toLocalInput(t.start)}"></div>
+        <!-- Same two fields, relabelled when the status is Sự kiện: for an
+             event these are not "when I plan to start" and "when it is due"
+             but the two ends of the thing itself. Kept as one pair rather than
+             a separate set so nothing has to be re-entered when the status
+             changes. -->
+        <div class="field"><label data-tm-deadline-label>${isEvent(t)?'Kết thúc sự kiện':'Hạn chót'}</label><input id="tm_deadline" type="datetime-local" value="${toLocalInput(t.deadline)}"></div>
+        <div class="field"><label data-tm-start-label>${isEvent(t)?'Bắt đầu sự kiện':'Bắt đầu'}</label><input id="tm_start" type="datetime-local" value="${toLocalInput(t.start)}"></div>
       </div>
       <div class="field-row">
         <div class="field"><label>Ước tính (giờ)</label><input id="tm_estimate" type="number" min="0" step="0.5" value="${t.estimateHours||1}"></div>
@@ -8809,7 +8855,10 @@ function viewKanban(){
   ts = ts.filter(t=> inPeriod(t, kanbanFilters.period));
   if(kanbanFilters.employeeId) ts = ts.filter(t=>t.assigneeId===kanbanFilters.employeeId);
   if(kanbanFilters.projectId) ts = ts.filter(t=>t.projectId===kanbanFilters.projectId);
-  const cols = [["Cần làm","⬜"],["Đang làm","🟧"],["Hoàn thành","✅"]];
+  // Derived from TASK_STATUSES, not a second hand-written list — a status that
+  // exists everywhere else but has no column here is a task you cannot find.
+  const KANBAN_ICONS = {"Cần làm":"⬜","Đang làm":"🟧","Hoàn thành":"✅",[TASK_STATUS_EVENT]:"🎀"};
+  const cols = TASK_STATUSES.map(s=>[s, KANBAN_ICONS[s] || "•"]);
   return `
     ${topbarHtml('Tiến độ', icon('board',20), '', '')}
     <div class="card" style="margin-bottom:16px;">
@@ -8895,6 +8944,9 @@ function timedSubtaskEntries(){
 }
 function tasksForDay(d){
   const timedTasks = activeTasks().filter(t=>{
+    // An event belongs to EVERY day it runs across, not just the one it began
+    // on — a three-day conference has to be visible on all three.
+    if(isEvent(t)) return eventCoversDay(t, d);
     const s = timetableSlotDate(t);
     return s && s.toDateString() === d.toDateString();
   });
@@ -8909,12 +8961,33 @@ function priorityColorHex(p){
   return p==='ASAP' ? '#9E1B1B' : p==='Cao' ? '#EF4444' : p==='Trung bình' ? '#F59E0B' : '#64748B';
 }
 /** Assign overlapping tasks to side-by-side lanes so nothing is hidden. */
-function layoutTimetableLanes(tasks){
+function layoutTimetableLanes(tasks, day){
+  const dayStart = day ? new Date(day) : null;
+  if(dayStart) dayStart.setHours(0,0,0,0);
   const items = tasks.map(t=>{
+    // Events are clipped to the day being drawn. A run that starts Friday
+    // evening and ends Sunday noon becomes: Friday from its start to midnight,
+    // Saturday edge to edge, Sunday midnight to its end. `contFrom`/`contTo`
+    // record which ends were cut, so the card can say it carries on.
+    if(isEvent(t) && dayStart){
+      const r = eventRange(t);
+      if(r){
+        const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate()+1);
+        const s = r.start > dayStart ? r.start : dayStart;
+        const e = r.end   < dayEnd   ? r.end   : dayEnd;
+        const hrs = (x)=> (x - dayStart) / 3600000;
+        // Clamped into the visible window, or an early-morning event would be
+        // drawn above the top of the grid where it cannot be seen.
+        const startH = Math.max(TT_START_HOUR, Math.min(TT_END_HOUR + 1, hrs(s)));
+        const endH   = Math.max(startH + 0.5,  Math.min(TT_END_HOUR + 1, hrs(e)));
+        return { t, startH, endH, lane:0, lanes:1, day:dayStart,
+                 contFrom: r.start < dayStart, contTo: r.end > dayEnd };
+      }
+    }
     const s = timetableSlotDate(t);
     const startH = s.getHours() + s.getMinutes()/60;
     const endH = startH + Math.max(0.5, t.estimateHours || 1);
-    return { t, startH, endH, lane:0, lanes:1 };
+    return { t, startH, endH, lane:0, lanes:1, day:dayStart };
   }).sort((a,b)=> a.startH - b.startH || a.endH - b.endH);
 
   // Group items into clusters of mutually overlapping blocks; every item in a
@@ -8941,8 +9014,13 @@ function layoutTimetableLanes(tasks){
   return items;
 }
 function timetableBlockHtml(item){
-  const { t, startH, endH, lane, lanes } = item;
-  const s = timetableSlotDate(t);
+  const { t, startH, endH, lane, lanes, contFrom, contTo } = item;
+  const ev = isEvent(t);
+  // For an event the drawn segment IS the truth for this day — reading t.start
+  // would print Friday's 19:00 on all three days of a weekend festival.
+  const s = (ev && item.day)
+    ? new Date(item.day.getTime() + startH*3600000)
+    : timetableSlotDate(t);
   const top = (startH - TT_START_HOUR) * TT_HOUR_H;
   const height = Math.max(24, (endH - startH) * TT_HOUR_H - 4);
   const color = priorityColorHex(t.priority);
@@ -8953,14 +9031,21 @@ function timetableBlockHtml(item){
   const openId = t.isSubtask ? t.parentId : t.id;
   const proj = projectById(t.projectId);
   // Tint the card by its project (falling back to priority), like the reference.
-  const tint = proj ? proj.color : color;
+  // Pink beats the project tint for events: the colour is what tells you at a
+  // glance that this block is something happening, not something to do.
+  const tint = ev ? '#EC4899' : (proj ? proj.color : color);
   const endDate = new Date(s.getTime() + (endH-startH)*3600000);
   const now = new Date();
   const running = now >= s && now <= endDate && !done;
   const leftMin = running ? Math.max(1, Math.round((endDate-now)/60000)) : 0;
   const elapsedPct = running ? Math.min(100, Math.max(0, ((now-s)/(endDate-s))*100)) : 0;
-  const chipIcon = t.isSubtask ? 'check' : (proj ? 'folder' : 'clock');
+  const chipIcon = ev ? 'calendar' : (t.isSubtask ? 'check' : (proj ? 'folder' : 'clock'));
   const compact = height < 52 || lanes >= 3;
+  // Arrows on the cut ends, so a middle day does not look like a fresh event
+  // that happens to start at midnight. Kept as two separate strings: built as
+  // one, the trailing arrow ended up printed at both ends of the title.
+  const spanIn  = (ev && contFrom) ? '↑ ' : '';
+  const spanOut = (ev && contTo)   ? ' ↓' : '';
 
   // People on the card: assignee first, then executors — shown as an
   // overlapping stack with a count badge, as in the reference.
@@ -8969,7 +9054,7 @@ function timetableBlockHtml(item){
   const stack = people.slice(0,3);
   const pct = done ? 100 : (t.completion || 0);
 
-  return `<div class="task-row-wrap tt-block ${compact?'is-compact':''} ${t.isSubtask?'is-sub':''} ${running?'running':''} ${done?'is-done':''}"
+  return `<div class="task-row-wrap tt-block ${ev?'is-event':''} ${compact?'is-compact':''} ${t.isSubtask?'is-sub':''} ${running?'running':''} ${done?'is-done':''}"
       data-open="${openId}"
       style="top:${top}px;height:${height}px;left:calc(${leftPct}% + 3px);width:calc(${widthPct}% - 6px);
              --tint:${tint};">
@@ -8979,7 +9064,7 @@ function timetableBlockHtml(item){
       ${people.length ? `<span class="tt-count">${people.length}</span>` : ''}
     </div>
     <div class="tt-block-body">
-      <span class="tt-block-title ${done?'done':''}">${t.isSubtask?'↳ ':''}${esc(t.title)}</span>
+      <span class="tt-block-title ${done?'done':''}">${spanIn}${t.isSubtask?'↳ ':''}${esc(t.title)}${spanOut}</span>
       ${!compact ? `<span class="tt-time">${fmtHM(s.toISOString())} <i>›</i> ${fmtHM(endDate.toISOString())}</span>` : ''}
     </div>
     ${running ? `<span class="tt-left-label">Còn ${leftMin}m</span>` : ''}
@@ -9050,7 +9135,7 @@ function viewTimetable(){
           const isToday = d.toDateString()===now.toDateString();
           return `<div class="tt-daycol ${isToday?'is-today':''}">
             ${hours.map(h=>`<div class="tt-hourcell" style="height:${TT_HOUR_H}px;" data-tt-slot="${ymdLocal(d)}|${h}" title="Bấm để thêm việc lúc ${String(h).padStart(2,'0')}:00"></div>`).join("")}
-            ${layoutTimetableLanes(dayTasks).map(item=>timetableBlockHtml(item)).join("")}
+            ${layoutTimetableLanes(dayTasks, d).map(item=>timetableBlockHtml(item)).join("")}
           </div>`;
         }).join("")}
         ${showNowLine ? `<div class="tt-nowline" style="top:${nowTop}px;"><span class="tt-now-dot"></span><span class="tt-now-time">${fmtHM(now.toISOString())}</span></div>` : ''}
@@ -9098,12 +9183,30 @@ function viewCalendar(){
   const cells = [...Array(daysInGrid)].map((_,i)=>{ const d=new Date(gridStart); d.setDate(d.getDate()+i); return d; });
   const today = new Date();
 
-  let ts = activeTasks().filter(t=>t.deadline);
+  // An event earns its place with a start even if no end was filled in —
+  // eventRange() supplies the missing end. A plain task still needs a deadline
+  // to have a day to sit on.
+  let ts = activeTasks().filter(t=> t.deadline || (isEvent(t) && t.start));
   if(calProjectFilter) ts = ts.filter(t=>t.projectId===calProjectFilter);
   ts = ts.filter(t=> calStatusFilters.has(t.status));
 
   const byDay = {};
-  ts.forEach(t=>{ const k=new Date(t.deadline).toDateString(); (byDay[k]=byDay[k]||[]).push(t); });
+  ts.forEach(t=>{
+    // A task lands on its deadline. An event lands on every day it runs, so a
+    // week-long trip fills the week instead of marking only the day it ends.
+    const r = isEvent(t) ? eventRange(t) : null;
+    if(r){
+      const d = new Date(r.start); d.setHours(0,0,0,0);
+      // Guard the loop: a corrupt or absurd range must not spin forever.
+      for(let i=0; i<370 && d < r.end; i++){
+        (byDay[d.toDateString()] = byDay[d.toDateString()] || []).push(t);
+        d.setDate(d.getDate()+1);
+      }
+    } else {
+      const k = new Date(t.deadline).toDateString();
+      (byDay[k]=byDay[k]||[]).push(t);
+    }
+  });
 
   return `
     ${topbarHtml('Lịch', icon('calendar',20), '', `<div style="font-size:12.5px;color:var(--text-2);">${ts.length} nhiệm vụ</div>`)}
