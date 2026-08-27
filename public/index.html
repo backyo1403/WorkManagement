@@ -5076,27 +5076,29 @@ function locateCoarse(){
 /* =========================================================
    VOXEL SKY BODY — the sun and moon, from voxel-sun.glb
    ---------------------------------------------------------
-   A note on the asset, because it shapes the whole design: despite its name,
-   voxel-sun.glb contains NO sun. Its one child is `moon_crescent`, built from
-   four meshes on four materials — moon_white, moon_grey, moon_crater and
-   moon_shadow. The lit voxels occupy the left limb (x −0.52…+0.44) and the
-   shadow voxels the right (−0.20…+0.52); together they tile one sphere.
+   Two separate models now, one per body, each used for what it actually is.
 
-   So phase is a MATERIAL problem here, not a geometry one. Relighting
-   moon_shadow fills the disc out to a full moon; leaving it dark gives the
-   crescent as authored; and turning the whole model 180° about Y swaps which
-   limb is lit, which is exactly the difference between waxing and waning.
+   voxel-sun.glb  — a voxel sphere carrying a six-tone warm ramp (cream, gold,
+     amber, orange, deep, core) plus ten rays radiating in the XY plane. The
+     ramp is the artist's, so the hour-of-day versions MODULATE it rather than
+     flattening every layer to one colour: a temperature multiplier and an
+     emissive level, which keeps cream reading paler than core at every hour.
+     It spins about Z, which sweeps the rays around the disc like a pinwheel —
+     spinning about Y would swing them toward and away from the camera instead.
 
-   The sun is that same voxel sphere lit and tinted warm. There is no separate
-   sun geometry to load, so this is the honest maximum from the file supplied —
-   the moment a real sun mesh exists it drops straight into setSun().
+   voxel-moon.glb — the crescent, four meshes on four materials. Its lit voxels
+     occupy the left limb and its shadow voxels the right; together they tile
+     one sphere. So phase here is a MATERIAL problem, not a geometry one:
+     relighting moon_shadow fills the disc out to full, and leaving it dark
+     gives the crescent as authored.
    ========================================================= */
-const SKY_GLB_URL = 'assets/sky/voxel-sun.glb';
+const SKY_URLS = { sun:'assets/sky/voxel-sun.glb', moon:'assets/sky/voxel-moon.glb' };
 let tbSkyFrame = 0, tbSkyHour = -1;
 const SkyBody = {
-  THREE:null, renderer:null, scene:null, camera:null, root:null,
-  mats:{}, base:{}, ready:false, loading:false, failed:false,
-  mode:null, spin:0, raf:0,
+  THREE:null, renderer:null, scene:null, camera:null,
+  models:{}, mats:{sun:{},moon:{}}, base:{sun:{},moon:{}},
+  ready:false, loading:false, failed:false,
+  mode:null, root:null, spin:0, baseYaw:0,
 
   async load(container){
     if(this.ready || this.loading || this.failed) return;
@@ -5105,45 +5107,72 @@ const SkyBody = {
       const THREE = await import('three');
       const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
       this.THREE = THREE;
-      const gltf = await new Promise((res, rej)=> new GLTFLoader().load(SKY_GLB_URL, res, undefined, rej));
 
       this.scene  = new THREE.Scene();
       this.camera = new THREE.PerspectiveCamera(30, 1, 0.1, 20);
-      this.camera.position.set(0, 0.35, 3.4);
+      this.camera.position.set(0, 0.25, 3.6);
       this.camera.lookAt(0, 0, 0);
-
-      this.root = gltf.scene;
-      this.root.scale.setScalar(1.55);
-      this.scene.add(this.root);
-
-      // Each material is cloned and its authored colour banked, so switching
-      // between sun and moon is a restore rather than a guess at what it was.
-      this.root.traverse(o=>{
-        if(!o.isMesh || !o.material) return;
-        o.material = o.material.clone();
-        const m = o.material, n = m.name || o.name;
-        this.mats[n] = m;
-        this.base[n] = {
-          color: m.color ? m.color.clone() : null,
-          emissive: m.emissive ? m.emissive.clone() : null,
-          emissiveIntensity: m.emissiveIntensity != null ? m.emissiveIntensity : 1
-        };
-      });
-
-      this.scene.add(new THREE.AmbientLight(0xffffff, 1.1));
-      this.key = new THREE.DirectionalLight(0xffffff, 2.0);
+      this.scene.add(new THREE.AmbientLight(0xffffff, 1.15));
+      this.key = new THREE.DirectionalLight(0xffffff, 1.9);
       this.key.position.set(-2, 1.4, 2.2);
       this.scene.add(this.key);
 
       this.renderer = new THREE.WebGLRenderer({ alpha:true, antialias:true });
       this.renderer.setClearAlpha(0);
       this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
+
+      const loader = new GLTFLoader();
+      // Only the body that belongs in the sky right now is fetched; the other
+      // arrives the first time the clock calls for it. Two 300KB models for a
+      // 34px decoration is not a download to make twice over up front.
+      const first = (new Date().getHours() >= 6 && new Date().getHours() < 18) ? 'sun' : 'moon';
+      this._loader = loader;
+      await this.ensure(first);
       this.ready = true; this.loading = false;
       this.attach(container);
       this.apply();
+      this.ensureLater(first === 'sun' ? 'moon' : 'sun');
     }catch(e){
       this.failed = true; this.loading = false;   // the CSS sun/moon stands in
     }
+  },
+
+  /** Fetch one model, clone its materials and bank the authored colours so a
+   *  re-skin is always a restore rather than a guess at what it used to be. */
+  async ensure(kind){
+    if(this.models[kind]) return this.models[kind];
+    const gltf = await new Promise((res, rej)=> this._loader.load(SKY_URLS[kind], res, undefined, rej));
+    const root = gltf.scene;
+    root.scale.setScalar(kind === 'sun' ? 1.05 : 1.55);   // the sun carries rays, so it needs the room
+    root.visible = false;
+    root.traverse(o=>{
+      if(!o.isMesh || !o.material) return;
+      o.material = o.material.clone();
+      const m = o.material, n = m.name || o.name;
+      this.mats[kind][n] = m;
+      this.base[kind][n] = {
+        color: m.color ? m.color.clone() : null,
+        emissive: m.emissive ? m.emissive.clone() : null,
+        emissiveIntensity: m.emissiveIntensity != null ? m.emissiveIntensity : 1
+      };
+    });
+    this.scene.add(root);
+    this.models[kind] = root;
+    return root;
+  },
+  /** Warm the other model in the background; a failure here is silent because
+   *  the body it would draw is not wanted for hours yet. */
+  ensureLater(kind){
+    setTimeout(()=>{ this.ensure(kind).catch(()=>{}); }, 4000);
+  },
+
+  /** Exactly one body is ever visible. */
+  show(kind){
+    const m = this.models[kind];
+    if(!m) return false;
+    Object.keys(this.models).forEach(k=>{ if(this.models[k]) this.models[k].visible = (k === kind); });
+    this.root = m; this.mode = kind;
+    return true;
   },
 
   attach(container){
@@ -5166,44 +5195,46 @@ const SkyBody = {
   /** Tint every material warm and self-lit. The whole sphere becomes the
    *  light source, which is what makes a voxel ball read as a sun. */
   setSun(hour){
-    if(!this.ready) return;
-    const T = this.THREE;
-    // Versions across the day: colour, glow and how high it sits. Dawn and
-    // dusk are low, deep and dim; midday is high, pale and fierce.
-    const V = hour < 6  ? { c:0xFF6B3A, e:0.55, top:26, size:30 }
-            : hour < 8  ? { c:0xFF8A3D, e:0.80, top:22, size:34 }
-            : hour < 11 ? { c:0xFFB247, e:1.05, top:16, size:34 }
-            : hour < 14 ? { c:0xFFE070, e:1.35, top:10, size:38 }
-            : hour < 16 ? { c:0xFFC85E, e:1.15, top:14, size:36 }
-            : hour < 18 ? { c:0xFF9F45, e:0.90, top:20, size:34 }
-            :             { c:0xFF6B3A, e:0.60, top:26, size:30 };
-    Object.keys(this.mats).forEach(n=>{
-      const m = this.mats[n];
-      // The crater and shadow voxels keep a little relative darkness so the
-      // sphere still has facets instead of flattening into a flat disc.
-      const dim = /crater|shadow/.test(n) ? 0.72 : 1;
-      if(m.color) m.color.setHex(V.c).multiplyScalar(dim);
-      if(m.emissive){ m.emissive.setHex(V.c); m.emissiveIntensity = V.e * dim; }
+    if(!this.ready || !this.show('sun')) return;
+    // Versions across the day. `t` is a temperature multiplier applied ON TOP
+    // of the model's own cream→core ramp, so dawn goes red without cream and
+    // core collapsing to the same colour — flattening every layer to one hex
+    // is what would throw away the shading the model was authored with.
+    const V = hour < 6  ? { t:[1.00,0.52,0.38], e:0.55, top:26, size:34, glow:'rgba(255,110,50,.34)' }
+            : hour < 8  ? { t:[1.00,0.64,0.44], e:0.80, top:22, size:38, glow:'rgba(255,140,60,.34)' }
+            : hour < 11 ? { t:[1.00,0.82,0.60], e:1.10, top:16, size:40, glow:'rgba(255,175,70,.32)' }
+            : hour < 14 ? { t:[1.00,0.98,0.86], e:1.45, top:10, size:44, glow:'rgba(255,220,110,.34)' }
+            : hour < 16 ? { t:[1.00,0.88,0.66], e:1.20, top:14, size:41, glow:'rgba(255,195,80,.32)' }
+            : hour < 18 ? { t:[1.00,0.70,0.48], e:0.90, top:20, size:38, glow:'rgba(255,150,60,.32)' }
+            :             { t:[1.00,0.50,0.36], e:0.58, top:26, size:34, glow:'rgba(255,105,48,.34)' };
+    const M = this.mats.sun, B = this.base.sun;
+    Object.keys(M).forEach(n=>{
+      const m = M[n], b = B[n];
+      if(!b) return;
+      if(b.color && m.color) m.color.copy(b.color).multiply({r:V.t[0], g:V.t[1], b:V.t[2]});
+      if(b.emissive && m.emissive){
+        m.emissive.copy(b.emissive).multiply({r:V.t[0], g:V.t[1], b:V.t[2]});
+        m.emissiveIntensity = b.emissiveIntensity * V.e;
+      }
     });
-    this.mode = 'sun';
     this.baseYaw = 0;
-    this.root.rotation.y = 0;
-    this.root.rotation.z = 0;
-    this.style(V.top, V.size, 'rgba(255,196,60,.30)');
+    this.root.rotation.set(0, 0, this.root.rotation.z || 0);
+    this.style(V.top, V.size, V.glow);
     this.render();
   },
 
   /** Restore the authored moon, then decide the phase. */
   setMoon(phase){
-    if(!this.ready) return;
-    Object.keys(this.mats).forEach(n=>{
-      const m = this.mats[n], b = this.base[n];
+    if(!this.ready || !this.show('moon')) return;
+    const M = this.mats.moon, B = this.base.moon;
+    Object.keys(M).forEach(n=>{
+      const m = M[n], b = B[n];
       if(!b) return;
       if(b.color && m.color) m.color.copy(b.color);
       if(b.emissive && m.emissive){ m.emissive.copy(b.emissive); m.emissiveIntensity = b.emissiveIntensity; }
     });
-    const shadow = this.mats['moon_shadow'];
-    const lit    = this.base['moon_white'];
+    const shadow = M['moon_shadow'];
+    const lit    = B['moon_white'];
     if(phase.full && shadow && lit){
       // Light the shadowed limb and the crescent becomes a full disc. This is
       // the whole reason the phase is done in materials: the file has one
@@ -5219,9 +5250,7 @@ const SkyBody = {
     // waxing-to-waning actually looks like. Negative scale would mirror it too
     // but inverts the winding and lights the model inside-out.
     this.baseYaw = 0;
-    this.root.rotation.y = 0;
-    this.root.rotation.z = phase.waning ? Math.PI : 0;
-    this.mode = 'moon';
+    this.root.rotation.set(0, 0, phase.waning ? Math.PI : 0);
     this.style(14, phase.full ? 38 : 34,
       phase.full ? 'rgba(150,190,255,.30)' : 'rgba(150,190,255,.20)');
     this.render();
@@ -5258,10 +5287,10 @@ const SkyBody = {
     if(!this.ready || document.hidden || !this.container || !this.container.isConnected) return;
     if(tbReduceMotion()) return;
     if(this.mode === 'sun'){
-      // A real, continuous turn — about one revolution a minute. The sun is
-      // lit the same on every side, so it can spin freely and the voxel facets
-      // catching the light are what sell it as a solid object.
-      this.root.rotation.y += 0.0055;
+      // About Z, so the ten rays sweep around the disc like a pinwheel.
+      // Spinning about Y would swing them toward and away from the camera and
+      // read as a wobble instead of a turn. Roughly one revolution a minute.
+      this.root.rotation.z += 0.0055;
     }else{
       // The moon does NOT spin. A turning crescent would walk its own shadow
       // around the disc and cycle through phases that contradict tonight's —
