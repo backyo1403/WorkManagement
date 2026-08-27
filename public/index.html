@@ -1339,10 +1339,16 @@ a{color:inherit;}
 /* The voxel sun/moon from the GLB. Same corner the CSS one occupied, same
    fixed anchoring, so it holds still while the page scrolls under it. Its
    `top` and size are set per hour and per moon phase from script. */
+/* The one part of the weather layer that takes clicks. The layer itself stays
+   pointer-events:none so it never intercepts the app; this is a ~44px target
+   in a corner that holds nothing else (checked: only .main is under it).
+   The transition is what makes the double-click swell read as a swell rather
+   than a jump. */
 .wx-body{
   position:fixed; top:12px; right:38px; width:34px; height:34px; z-index:3;
-  pointer-events:none;
-  transition:top .8s ease, width .8s ease, height .8s ease, filter .8s ease;
+  pointer-events:auto; cursor:pointer;
+  transition:top .8s ease, width .5s cubic-bezier(.34,1.4,.5,1),
+             height .5s cubic-bezier(.34,1.4,.5,1), filter .5s ease;
 }
 .wx-body canvas{display:block; width:100%; height:100%;}
 /* Once the model is drawing, the CSS bodies are redundant — but they stay in
@@ -5093,6 +5099,9 @@ function locateCoarse(){
      gives the crescent as authored.
    ========================================================= */
 const SKY_URLS = { sun:'assets/sky/voxel-sun.glb', moon:'assets/sky/voxel-moon.glb' };
+const SKY_SIZE = 1.2;        // standing size, 20% over the original tuning
+const SKY_BOOST = 1.3;       // double-click swell, 30% over standard
+const SKY_BOOST_MS = 10000;  // …held for ten seconds
 let tbSkyFrame = 0, tbSkyHour = -1;
 const SkyBody = {
   THREE:null, renderer:null, scene:null, camera:null,
@@ -5256,13 +5265,33 @@ const SkyBody = {
     this.render();
   },
 
+  /** Sizes from setSun/setMoon are the AUTHORED numbers; the two multipliers
+   *  live here so every caller stays in one vocabulary.
+   *    SKY_SIZE  — the standing 20% enlargement over the original tuning
+   *    boost     — a temporary swell while the user is looking at it
+   *  The last call is remembered so a boost can restyle without the caller
+   *  having to hand back the hour or the phase it was derived from. */
   style(top, size, glow){
     if(!this.container) return;
+    this._lastStyle = { top, size, glow };
+    const px = Math.round(size * SKY_SIZE * (this.boost || 1));
     Object.assign(this.container.style, {
-      top: top+'px', width: size+'px', height: size+'px',
-      filter: `drop-shadow(0 0 ${Math.round(size*0.45)}px ${glow})`
+      top: top+'px', width: px+'px', height: px+'px',
+      filter: `drop-shadow(0 0 ${Math.round(px*0.45)}px ${glow})`
     });
-    if(this.renderer) this.renderer.setSize(size, size, false);
+    if(this.renderer) this.renderer.setSize(px, px, false);
+  },
+  restyle(){ const s = this._lastStyle; if(s) this.style(s.top, s.size, s.glow); },
+
+  /** Double-clicked: swell to 30% over standard, hold, then settle back.
+   *  Re-triggering restarts the hold rather than stacking, so leaning on the
+   *  mouse cannot leave it stuck large. */
+  pulse(){
+    if(!this.ready) return;
+    this.boost = SKY_BOOST;
+    this.restyle();
+    clearTimeout(this._boostTimer);
+    this._boostTimer = setTimeout(()=>{ this.boost = 1; this.restyle(); }, SKY_BOOST_MS);
   },
 
   /** Re-read the clock and paint whichever body belongs in the sky. */
@@ -5451,6 +5480,9 @@ function applyWeatherScene(kind){
   layer.classList.remove('has-3d-body');
   const slot = document.getElementById('wxBody');
   if(slot && !SkyBody.failed){
+    // Bound per scene because the slot is a fresh element each time the layer's
+    // innerHTML is rebuilt; nothing to unbind, it went with the old node.
+    slot.addEventListener('dblclick', (e)=>{ e.stopPropagation(); SkyBody.pulse(); });
     if(SkyBody.ready){ SkyBody.attach(slot); SkyBody.apply(); }
     else SkyBody.load(slot);   // attach() adds the class when it lands
   }
@@ -13110,7 +13142,9 @@ function wireTobby(){
   if(tbDocDblHandler) document.removeEventListener('dblclick', tbDocDblHandler);
   tbDocDblHandler = (e)=>{
     if(!tobbyEnabled()) return;
-    if(e.target.closest('#tobbyDock, #tobbyPanel, .modal, .tb-speech')) return;
+    // .wx-body has its own double-click (the sun swells), so a hit there must
+    // not ALSO send Tobby sprinting to the corner.
+    if(e.target.closest('#tobbyDock, #tobbyPanel, .modal, .tb-speech, .wx-body')) return;
     // Double-click is also "select this word" and "open this row". Anywhere the
     // user is reading, typing or operating a control, that meaning wins.
     if(e.target.closest('input, textarea, select, button, a, [contenteditable], [data-open], .data-table, .note-card')) return;
