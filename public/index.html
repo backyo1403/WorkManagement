@@ -5154,6 +5154,13 @@ const SkyBody = {
     const px = Math.max(32, Math.round(s.width||44));
     this.renderer.setSize(px, px, false);
     Object.assign(this.renderer.domElement.style, {width:'100%', height:'100%', display:'block'});
+    // Retire the CSS stand-in HERE, not at the call site. The load is async, so
+    // on the very first scene `ready` is still false when applyWeatherScene
+    // checks it — the class never got added and both suns sat in the corner
+    // together until some later scene change happened to re-run it. Doing it
+    // at the moment the canvas actually goes in is true whenever it is true.
+    const layer = document.getElementById('weatherLayer');
+    if(layer) layer.classList.add('has-3d-body');
   },
 
   /** Tint every material warm and self-lit. The whole sphere becomes the
@@ -5250,10 +5257,20 @@ const SkyBody = {
   tick(){
     if(!this.ready || document.hidden || !this.container || !this.container.isConnected) return;
     if(tbReduceMotion()) return;
-    this.spin += 0.0016;
-    // Sways around whichever heading the phase set, never replaces it — a
-    // waning moon must keep facing the way it was turned.
-    this.root.rotation.y = (this.baseYaw || 0) + Math.sin(this.spin) * 0.18;
+    if(this.mode === 'sun'){
+      // A real, continuous turn — about one revolution a minute. The sun is
+      // lit the same on every side, so it can spin freely and the voxel facets
+      // catching the light are what sell it as a solid object.
+      this.root.rotation.y += 0.0055;
+    }else{
+      // The moon does NOT spin. A turning crescent would walk its own shadow
+      // around the disc and cycle through phases that contradict tonight's —
+      // and a real moon keeps one face to us anyway. It gets a slow tilt
+      // instead: enough parallax to read as 3D, no change of phase.
+      this.spin += 0.0042;
+      this.root.rotation.y = (this.baseYaw || 0) + Math.sin(this.spin) * 0.30;
+      this.root.rotation.x = Math.sin(this.spin * 0.6) * 0.10;
+    }
     this.render();
   }
 };
@@ -5400,12 +5417,13 @@ function applyWeatherScene(kind){
   // Hand the voxel sun/moon its slot. Loaded once, then re-attached on every
   // scene change — the layer's innerHTML was just replaced, so the canvas from
   // the previous scene is gone even though the renderer behind it is fine.
+  // The layer element is reused across scenes, so the previous scene's class
+  // would otherwise linger and hide a CSS sun that has no 3D one behind it.
+  layer.classList.remove('has-3d-body');
   const slot = document.getElementById('wxBody');
   if(slot && !SkyBody.failed){
     if(SkyBody.ready){ SkyBody.attach(slot); SkyBody.apply(); }
-    else SkyBody.load(slot);
-    // Once the model is up it IS the sun, so the CSS stand-in steps aside.
-    if(SkyBody.ready) layer.classList.add('has-3d-body');
+    else SkyBody.load(slot);   // attach() adds the class when it lands
   }
 }
 /** Small readout for the settings panel and the dashboard clock area. */
