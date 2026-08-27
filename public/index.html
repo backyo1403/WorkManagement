@@ -737,11 +737,28 @@ a{color:inherit;}
 .dash-weather span{font-size:9.5px; font-weight:650; color:var(--text-2); white-space:nowrap;}
 
 /* ---------- Timetable ---------- */
-.tt-wrap{border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; background:var(--surface);}
-.tt-headrow{display:flex; border-bottom:1px solid var(--border); background:var(--surface-2);}
+/* The WRAP scrolls, not the body, and the header rides along stuck to its top.
+   When the body scrolled instead, its scrollbar took ~9px out of the seven
+   columns while the header — which does not scroll — kept the full width. That
+   is 1.28px of extra width per day head, so by Sunday the label sat 8px right
+   of its own column. One scroll container means one width for both, and the
+   drift cannot exist. */
+.tt-wrap{border:1px solid var(--border); border-radius:var(--radius);
+  overflow:hidden auto; max-height:calc(100vh - 260px); background:var(--surface);}
+.tt-headrow{display:flex; border-bottom:1px solid var(--border); background:var(--surface-2);
+  position:sticky; top:0; z-index:6;}
 .tt-corner{width:62px; flex-shrink:0; border-right:1px solid var(--border);}
 .tt-dayhead{flex:1; text-align:center; padding:10px 4px 9px; border-right:1px solid var(--border);
   color:var(--text-2); cursor:pointer; position:relative; min-width:0;}
+/* Seven columns in a phone's width leave ~42px each, where "Thứ Hai" cannot
+   fit and every heading was being clipped mid-word. Below the app's mobile
+   breakpoint the narrow form (T2…CN) takes over. */
+.tt-dayname b{font-weight:inherit;}
+.tt-dayname i{display:none; font-style:normal;}
+@media (max-width:699px){
+  .tt-dayname b{display:none;}
+  .tt-dayname i{display:inline;}
+}
 .tt-dayname{font-size:12px; font-weight:600; color:var(--text-2); text-transform:capitalize;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .tt-daydate{font-size:12px; font-weight:800; color:var(--text); margin-top:1px; letter-spacing:-.01em;}
@@ -756,7 +773,7 @@ a{color:inherit;}
 .tt-dayhead.today{background:color-mix(in srgb, var(--brand) 8%, transparent);}
 .tt-dayhead:last-child{border-right:none;}
 .tt-dayhead.today{background:var(--brand-soft); color:var(--brand-dark);}
-.tt-body{display:flex; position:relative; overflow-y:auto; max-height:calc(100vh - 300px);}
+.tt-body{display:flex; position:relative;}   /* scrolling moved to .tt-wrap */
 .tt-hours{width:62px; flex-shrink:0; border-right:1px solid var(--border);}
 .tt-hourlabel{font-size:10.5px; color:var(--text-3); text-align:right; padding:2px 7px 0 0; border-bottom:1px solid var(--border); box-sizing:border-box;}
 .tt-daycol{flex:1; position:relative; border-right:1px solid var(--border); min-width:0;}
@@ -786,7 +803,22 @@ a{color:inherit;}
   background:rgba(255,255,255,.24); color:#fff; font-size:9.5px; font-weight:800;
   display:inline-flex; align-items:center; justify-content:center;}
 
-.tt-body{flex:1; min-height:0; display:flex; flex-direction:column; gap:1px; overflow:hidden;}
+/* Named for the block it belongs to, NOT `.tt-body` — that name is already the
+   week grid's, and this rule sits later in the sheet, so it was winning for
+   both. The grid became `flex-direction:column` and stacked all seven days on
+   top of each other instead of side by side. Two different things cannot share
+   one class name when they want opposite layouts. */
+.tt-block-body{flex:1; min-height:0; display:flex; flex-direction:column; gap:1px; overflow:hidden;}
+/* Short cards: the NAME survives, the avatars go.
+   A half-hour task is 24px tall. Take 19px of padding and an 18px avatar row
+   that refuses to shrink, and the title is left with zero height — the card
+   showed a row of faces and no indication of what the task was. On a card this
+   size the one thing worth the space is what it is; who it belongs to is a
+   hover or a click away. */
+.tt-block.is-compact{padding:3px 8px 7px;}
+.tt-block.is-compact .tt-head{display:none;}
+.tt-block.is-compact .tt-block-title{
+  font-size:10.5px; line-height:1.2; -webkit-line-clamp:1;}
 .tt-block-title{font-size:11.5px; font-weight:700; color:#fff; overflow:hidden;
   display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; word-break:break-word; line-height:1.28;}
 .tt-block-title.done{text-decoration:line-through;}
@@ -1969,7 +2001,9 @@ body{
 
 /* ---------- timetable ---------- */
 .tt-wrap{border-radius:var(--r-card); border:1px solid var(--hairline); box-shadow:var(--shadow);}
-.tt-headrow{background:transparent; border-bottom:1px solid var(--hairline);}
+/* Opaque, not transparent: it is sticky now, and the hour rows scroll beneath
+   it. A see-through header would let them read straight through the day names. */
+.tt-headrow{background:var(--surface); border-bottom:1px solid var(--hairline);}
 .tt-corner,.tt-hours{border-right:1px solid var(--hairline);}
 .tt-dayhead{border-right:1px solid var(--hairline); padding:13px 6px 12px;}
 .tt-dayname{font-size:11px; font-weight:550; color:var(--text-3); letter-spacing:.02em;}
@@ -8935,7 +8969,7 @@ function timetableBlockHtml(item){
   const stack = people.slice(0,3);
   const pct = done ? 100 : (t.completion || 0);
 
-  return `<div class="task-row-wrap tt-block ${t.isSubtask?'is-sub':''} ${running?'running':''} ${done?'is-done':''}"
+  return `<div class="task-row-wrap tt-block ${compact?'is-compact':''} ${t.isSubtask?'is-sub':''} ${running?'running':''} ${done?'is-done':''}"
       data-open="${openId}"
       style="top:${top}px;height:${height}px;left:calc(${leftPct}% + 3px);width:calc(${widthPct}% - 6px);
              --tint:${tint};">
@@ -8944,7 +8978,7 @@ function timetableBlockHtml(item){
       ${stack.length ? `<span class="tt-avatars">${stack.map(p=>avatarHtml(p,17)).join("")}</span>` : ''}
       ${people.length ? `<span class="tt-count">${people.length}</span>` : ''}
     </div>
-    <div class="tt-body">
+    <div class="tt-block-body">
       <span class="tt-block-title ${done?'done':''}">${t.isSubtask?'↳ ':''}${esc(t.title)}</span>
       ${!compact ? `<span class="tt-time">${fmtHM(s.toISOString())} <i>›</i> ${fmtHM(endDate.toISOString())}</span>` : ''}
     </div>
@@ -8995,7 +9029,13 @@ function viewTimetable(){
           const dd = String(d.getDate()).padStart(2,'0');
           const mm = String(d.getMonth()+1).padStart(2,'0');
           return `<div class="tt-dayhead ${isToday?'today':''}" data-tt-dayjump="${ymdLocal(d)}">
-            <div class="tt-dayname">${d.toLocaleDateString(loc(),{weekday:'long'})}</div>
+            <!-- Both labels ship and CSS picks between them. Choosing in JS
+                 would be correct only until the window was resized, because
+                 the view is not re-rendered on resize. -->
+            <div class="tt-dayname"
+              ><b>${d.toLocaleDateString(loc(),{weekday:'long'})}</b
+              ><i>${d.toLocaleDateString(loc(),{weekday:'narrow'})}</i
+            ></div>
             <div class="tt-daydate">${dd}.${mm}.${d.getFullYear()}</div>
             ${n?`<span class="tt-day-badge">${n}</span>`:''}
           </div>`;
