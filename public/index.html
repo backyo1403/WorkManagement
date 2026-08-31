@@ -13684,9 +13684,16 @@ function tobbyOpenPanel(opts){
   const p = document.getElementById('tobbyPanel');
   if(!p) return;
   const quiet = !!(opts && opts.quiet);
+  // Replacing innerHTML resets scrollTop, and the panel scrolls. Feeding lives
+  // near the bottom, so picking a dish sent the panel straight back to the top:
+  // the dish you chose, the "eating…" note and the Stop button all scrolled out
+  // of sight in the same instant you clicked. It fed him every time — it just
+  // looked exactly like nothing had happened.
+  const keepScroll = quiet ? p.scrollTop : 0;
   p.innerHTML = tobbyPanelHtml();
   p.hidden = false;
   tobbyPositionPanel();
+  if(keepScroll) p.scrollTop = keepScroll;
   if(!quiet) tobbyPlay('curious','INTERACTION', 1800);
   tobby().lastInteractionAt = nowISO();
   const mini = document.getElementById('tobbyMini');
@@ -13769,7 +13776,12 @@ function tobbyOpenPanel(opts){
     try{ show(await tobbyAIService.ask(q)); }
     finally{ clearTimeout(slow); askInput.disabled = false; askInput.focus(); }
   };
-  if(askInput) setTimeout(()=> askInput.focus(), 40);
+  // Not on a quiet redraw. Focusing an input makes the browser scroll it into
+  // view, and the ask box is at the top of the panel — so after picking a dish
+  // near the bottom, this dragged the panel back to the top 40ms later and took
+  // the chosen dish, the "eating…" note and the Stop button out of sight with
+  // it. The click had worked; it just erased all its own evidence.
+  if(askInput && !quiet) setTimeout(()=> askInput.focus(), 40);
   p.querySelectorAll('[data-tb-do]').forEach(b=> b.onclick = ()=>{
     const k = b.dataset.tbDo;
     tobbyClosePanel();
