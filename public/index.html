@@ -12840,6 +12840,13 @@ function tobbyPaint(){
         // The bowl is his own prop, so it only exists once he does — this is
         // the first moment the saved dish and colour can be applied to it.
         TobbyBowl.apply();
+        // If the panel was already open it is showing "loading Tobby…" over
+        // eight dead buttons; now they can work.
+        const pnl = document.getElementById('tobbyPanel');
+        if(pnl && !pnl.hidden) tobbyOpenPanel({ quiet:true });
+        // A meal that was still running when the page reloaded waits for this
+        // moment — there was nowhere to put the food until now.
+        tobbyResumeMeal();
       });
     }
     if(Tobby3D.ready){
@@ -12912,6 +12919,11 @@ function tobbyAlertLevel(){
 function tobbySyncToBoard(){
   if(!tobbyEnabled()) return;
   tobbyRecomputeMood();
+  // A held clip is a deliberate thing that runs for a set time — eating is the
+  // one — and this runs on every board change. The test below is `<=`, and a
+  // meal sits at exactly ACTIVITY, so editing a task mid-meal used to relax him
+  // straight out of it. His face can wait until he has finished.
+  if(tbAnim.clip && performance.now() < tbAnim.until){ tobbyPaint(); return; }
   const lvl = tobbyAlertLevel();
   if(tbAnim.priority <= TB_PRIO.ACTIVITY){
     if(lvl==='urgent')          tobbyPlay('worried','ACTIVITY', 2200);
@@ -13601,10 +13613,16 @@ function tobbyPanelHtml(){
 
     ${(()=>{ const b = TobbyBowl.state(); const eating = b.kind !== 'empty';
       const cur = TB_BOWL_FOODS.find(f=>f[0]===b.kind);
-      return `<div class="tb-sec">${L('Cho ăn','Feed')} <i>${L('+5 XP mỗi bữa','+5 XP a meal')}</i></div>
+      // The bowl is part of his model, so there is nothing to feed until it has
+      // arrived. Saying so beats eight buttons that quietly do nothing.
+      const waiting = !TobbyBowl.prop();
+      const note = eating ? L('đang ăn…','eating…')
+                 : waiting ? L('đang tải Tobby…','loading Tobby…')
+                 : L('+5 XP mỗi bữa','+5 XP a meal');
+      return `<div class="tb-sec">${L('Cho ăn','Feed')} <i>${note}</i></div>
       <div class="tb-qs tb-food">
         ${TB_BOWL_FOODS.filter(f=>f[0]!=='empty').map(([k,ico,label])=>
-          `<button class="tb-q ${b.kind===k?'on':''}" data-tb-food="${k}"${eating?' disabled':''}
+          `<button class="tb-q ${b.kind===k?'on':''}" data-tb-food="${k}"${eating||waiting?' disabled':''}
             title="${esc(label)}">${ico} ${esc(label)}</button>`).join('')}
       </div>
       ${eating ? `<div class="tb-qs"><button class="tb-q act" data-tb-food="empty">${
@@ -14154,7 +14172,41 @@ const TobbyBowl = {
   },
 };
 /* ---------- feeding ---------- */
-let tbFeedTimer = 0;
+let tbFeedTimer = 0, tbMealResumed = false;
+/** Settle a meal that was interrupted by the page going away.
+ *
+ *  The dish is saved but the thirty-second timer only ever lived in memory, so
+ *  a reload left the bowl permanently "in progress": every dish disabled, every
+ *  feed refused, and no meal actually running. Feeding was over for good, and
+ *  the only way out was a Stop button nobody would connect with it. That is why
+ *  it looked broken in production and fine here — a fresh session never hits it.
+ *
+ *  Timed from `lastFedAt`, which was already being saved: come straight back
+ *  and he carries on eating for what is left; come back later and the meal is
+ *  finished properly, paying the XP it earned. */
+function tobbyResumeMeal(){
+  if(tbMealResumed) return;
+  const bowl = TobbyBowl.state();
+  if(bowl.kind === 'empty'){ tbMealResumed = true; return; }
+  const started = Date.parse(bowl.lastFedAt || '') || 0;
+  const left = started ? TB_BOWL_EAT_MS - (Date.now() - started) : 0;
+  if(left <= 800){
+    // Finished while you were away. Ending it properly is what unblocks
+    // feeding, and it needs no model — so it happens even if the model never
+    // arrives at all.
+    tbMealResumed = true;
+    tobbyEndMeal();
+    return;
+  }
+  // Still running, but there is nothing to put the food in until the model is
+  // here. Leave the flag clear and this runs again once it is.
+  if(!TobbyBowl.prop()) return;
+  tbMealResumed = true;
+  TobbyBowl.apply();
+  tobbyPlayClip('Tobby_EatFromBowl', left);
+  clearTimeout(tbFeedTimer);
+  tbFeedTimer = setTimeout(tobbyEndMeal, left);
+}
 /** Serve a dish and let him eat it.
 
  *  There is no walk to the bowl any more, and no walk back: the bowl is part
@@ -14163,7 +14215,14 @@ function tobbyFeed(kind){
   const bowl = TobbyBowl.state();
   if(kind === 'empty'){ tobbyEndMeal({ cancel:true }); return; }
   if(bowl.kind !== 'empty') return;               // already eating — one meal at a time
-  if(!TobbyBowl.prop()) return;                   // model not here yet
+  // Refusing in silence is how "I clicked a dish and nothing happened" happens.
+  // The model arrives over the network and may still be on its way, or may
+  // never arrive at all on a connection that cannot reach it.
+  if(!TobbyBowl.prop()){
+    toast(TB_L('Tobby chưa sẵn sàng — thử lại sau vài giây',
+               'Tobby is still arriving — try again in a moment'));
+    return;
+  }
 
   bowl.kind = kind;
   bowl.fedCount = (bowl.fedCount||0) + 1;
@@ -14358,6 +14417,9 @@ function wireTobby(){
   tobbyRelax();
   tobbyStartLoop();
   tobbySyncToBoard();
+  // Last, because tobbyRelax() two lines up clears any held clip — resuming
+  // before it meant the meal was served and timed but never animated.
+  tobbyResumeMeal();
 }
 
 /* ---------- growing up, in public ----------
