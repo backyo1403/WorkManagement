@@ -2734,6 +2734,15 @@ body{
 }
 .tb-speech.out{animation:tbFade .2s ease forwards;}
 @keyframes tbPop{from{opacity:0; transform:translateX(-50%) translateY(8px) scale(.92);} to{opacity:1; transform:translateX(-50%);}}
+/* The panel's own entrance. It must NOT be tbPop: that one ends on
+   translateX(-50%) because the speech bubble it was written for is centred with
+   left:50%. The panel is placed by an explicit left from script, so borrowing
+   that keyframe — with fill-mode `both`, so the final frame sticks — parked it
+   half its own width off to the left, permanently. On a narrow window the
+   mobile rule makes the panel full-width, which turned that into 254px and put
+   most of it, including half the dishes, off the edge of the screen where no
+   click can reach. */
+@keyframes tbPanelPop{from{opacity:0; transform:translateY(8px) scale(.92);} to{opacity:1; transform:none;}}
 @keyframes tbFade{to{opacity:0; transform:translateX(-50%) translateY(6px);}}
 /* The little tail that ties the bubble to the dog. */
 .tb-speech::after{
@@ -2766,7 +2775,7 @@ body{
   max-height:min(72vh, 560px); overflow-y:auto;
   background:var(--surface); border:1px solid var(--border); border-radius:16px;
   box-shadow:var(--shadow-lg); padding:12px 13px 14px;
-  animation:tbPop .2s cubic-bezier(.34,1.3,.64,1) both;
+  animation:tbPanelPop .2s cubic-bezier(.34,1.3,.64,1) both;
 }
 .tb-panel[hidden]{display:none;}
 .tb-panel-head{display:flex; align-items:center; gap:9px; margin-bottom:9px;}
