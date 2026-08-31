@@ -2792,14 +2792,25 @@ body{
 .tb-sec{font-size:9.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
   color:var(--text-3); margin:11px 0 6px;}
 .tb-qs{display:flex; flex-wrap:wrap; gap:5px;}
-/* The section heading carries a quiet aside — what a meal is worth — without
-   turning into a second line of text above the dishes. */
-.tb-sec i{font-style:normal; font-weight:600; letter-spacing:0; text-transform:none;
-  opacity:.62; margin-left:5px;}
-/* Dishes on a grid rather than a wrapped row: eight items that reflow into a
-   different shape every time you open the panel are hard to aim at. */
-.tb-food{display:grid !important; grid-template-columns:repeat(2, 1fr); gap:5px;}
-.tb-food .tb-q{justify-content:flex-start; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+/* The feeding window. Dishes on a fixed grid rather than a wrapped row: eight
+   items that reflow into a different shape each time are hard to aim at. */
+.tb-dishes{display:grid; grid-template-columns:repeat(2, 1fr); gap:7px;}
+.tb-dish{
+  display:flex; align-items:center; gap:8px; min-width:0;
+  padding:10px 12px; border-radius:11px; cursor:pointer;
+  border:1px solid var(--border); background:var(--surface-2); color:var(--text);
+  font-size:13px; font-weight:600; text-align:left;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  transition:border-color .12s ease, background .12s ease, transform .12s ease;
+}
+.tb-dish span{font-size:17px; line-height:1; flex-shrink:0;}
+.tb-dish:hover:not(:disabled){border-color:var(--brand); transform:translateY(-1px);}
+.tb-dish.on{border-color:var(--brand); background:color-mix(in srgb, var(--brand) 14%, transparent);}
+.tb-dish:disabled{opacity:.42; cursor:not-allowed;}
+.tb-feed-foot{
+  display:flex; align-items:center; justify-content:space-between; gap:9px;
+  margin-top:18px; font-size:11.5px; color:var(--text-3);
+}
 .tb-bowlcols{display:flex; gap:7px; flex-wrap:wrap;}
 .tb-bowlcols button{
   width:26px; height:26px; border-radius:50%; padding:0; cursor:pointer;
@@ -13618,31 +13629,16 @@ function tobbyPanelHtml(){
       <button class="tb-q act" data-tb-do="review">${icon('activity',12)} ${L('Xem lại hôm nay','Review today')}</button>
       <button class="tb-q act" data-tb-do="calendar">${icon('calendar',12)} ${L('Mở lịch','Open calendar')}</button>
       <button class="tb-q act" data-tb-do="notif">${icon('bell',12)} ${L('Thông báo','Notifications')}</button>
+      ${(()=>{ const b = TobbyBowl.state();
+        const cur = TB_BOWL_FOODS.find(f=>f[0]===b.kind);
+        // One button, not two sections. Eight dishes and seven swatches laid out
+        // in the panel pushed everything else below the fold and made feeding a
+        // scroll-then-aim exercise; the choice belongs in a window of its own.
+        return `<button class="tb-q act ${cur&&b.kind!=='empty'?'on':''}" data-tb-feed>🍽️ ${
+          cur && b.kind !== 'empty'
+            ? L('Đang ăn: ','Eating: ') + esc(cur[2])
+            : L('Cho ăn','Feed')}</button>`; })()}
     </div>
-
-    ${(()=>{ const b = TobbyBowl.state(); const eating = b.kind !== 'empty';
-      const cur = TB_BOWL_FOODS.find(f=>f[0]===b.kind);
-      // The bowl is part of his model, so there is nothing to feed until it has
-      // arrived. Saying so beats eight buttons that quietly do nothing.
-      const waiting = !TobbyBowl.prop();
-      const note = eating ? L('đang ăn…','eating…')
-                 : waiting ? L('đang tải Tobby…','loading Tobby…')
-                 : L('+5 XP mỗi bữa','+5 XP a meal');
-      return `<div class="tb-sec">${L('Cho ăn','Feed')} <i>${note}</i></div>
-      <div class="tb-qs tb-food">
-        ${TB_BOWL_FOODS.filter(f=>f[0]!=='empty').map(([k,ico,label])=>
-          `<button class="tb-q ${b.kind===k?'on':''}" data-tb-food="${k}"${eating||waiting?' disabled':''}
-            title="${esc(label)}">${ico} ${esc(label)}</button>`).join('')}
-      </div>
-      ${eating ? `<div class="tb-qs"><button class="tb-q act" data-tb-food="empty">${
-        L('Dừng bữa','Stop the meal')}${cur?' · '+esc(cur[2]):''}</button></div>` : ''}
-      <div class="tb-sec">${L('Màu bát','Bowl colour')}</div>
-      <div class="tb-bowlcols">
-        ${TB_BOWL_COLORS.map(([hex,name])=>
-          `<button data-tb-bowlcol="${hex}" title="${esc(name)}"
-            class="${(b.color||'').toLowerCase()===hex.toLowerCase()?'on':''}"
-            style="background:${hex}"></button>`).join('')}
-      </div>`; })()}
 
     <div class="tb-sec">${L('Nhóm công việc','Work group')}</div>
     <div class="tb-qs">
@@ -13798,20 +13794,8 @@ function tobbyOpenPanel(opts){
   // Feeding. The panel is redrawn rather than closed, so the dish you picked
   // shows as chosen and the row turns into "stop the meal" — you can see what
   // he is eating and how to call it off without hunting for the panel again.
-  // stopPropagation, because redrawing the panel detaches the button that was
-  // clicked — and the document's close-on-outside-click handler then sees a
-  // target the panel no longer contains and shuts the panel on its own.
-  p.querySelectorAll('[data-tb-food]').forEach(b=> b.onclick = (e)=>{
-    e.stopPropagation();
-    const k = b.dataset.tbFood;
-    if(k === 'empty') tobbyEndMeal({ cancel:true }); else tobbyFeed(k);
-    tobbyOpenPanel({ quiet:true });
-  });
-  p.querySelectorAll('[data-tb-bowlcol]').forEach(b=> b.onclick = (e)=>{
-    e.stopPropagation();
-    TobbyBowl.setColor(b.dataset.tbBowlcol);
-    tobbyOpenPanel({ quiet:true });
-  });
+  const feedBtn = p.querySelector('[data-tb-feed]');
+  if(feedBtn) feedBtn.onclick = (e)=>{ e.stopPropagation(); tobbyFeedModal(); };
   p.querySelectorAll('[data-tb-wear]').forEach(b=> b.onclick = ()=>{
     const T = tobby(), k = b.dataset.tbWear;
     T.worn = T.worn.includes(k) ? T.worn.filter(x=>x!==k) : [...T.worn, k].slice(-3);
@@ -14291,6 +14275,94 @@ const TB_BOWL_COLORS = [
   ['#4A5568','Xám'],
 ];
 
+/** The dish and the bowl colour, in a window of their own.
+ *
+ *  They used to be two sections inside Tobby's panel: eight dishes and seven
+ *  swatches, which pushed the rest of the panel below the fold and made feeding
+ *  a scroll-then-aim job in a box that redraws under you. A modal has room for
+ *  all of it at once and does not move while you are reading it. */
+function tobbyFeedModal(){
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  const close = ()=> overlay.remove();
+  const L = TB_L;
+
+  function draw(){
+    const b = TobbyBowl.state();
+    const eating  = b.kind !== 'empty';
+    const waiting = !TobbyBowl.prop();
+    const cur = TB_BOWL_FOODS.find(f=>f[0]===b.kind);
+    overlay.innerHTML = `<div class="modal" style="max-width:430px;">
+      <div class="modal-header">
+        <div class="modal-title">🍽️ ${L('Cho Tobby ăn','Feed Tobby')}</div>
+        <button class="close-x" data-x>✕</button>
+      </div>
+      ${eating ? `<div class="badge today" style="display:block;padding:9px 12px;margin-bottom:14px;">
+          ${L('Đang ăn','Eating')} <b>${esc(cur?cur[2]:'')}</b> · ${
+          L('bát tự hết sau 30 giây','the bowl empties after 30 seconds')}
+        </div>` : waiting ? `<div class="badge" style="display:block;padding:9px 12px;margin-bottom:14px;">
+          ${L('Đang tải Tobby… thử lại sau vài giây','Loading Tobby… try again in a moment')}
+        </div>` : ''}
+      <div class="modal-section-label" style="margin-top:0;padding-top:0;border-top:none;">${
+        L('Món ăn','Dish')}</div>
+      <div class="tb-dishes">
+        ${TB_BOWL_FOODS.filter(f=>f[0]!=='empty').map(([k,ico,label])=>
+          `<button class="tb-dish ${b.kind===k?'on':''}" data-dish="${k}"${
+            eating||waiting?' disabled':''}><span>${ico}</span>${esc(label)}</button>`).join('')}
+      </div>
+      <div class="modal-section-label">${L('Màu bát','Bowl colour')}</div>
+      <div class="tb-bowlcols">
+        ${TB_BOWL_COLORS.map(([hex,name])=>
+          `<button data-col="${hex}" title="${esc(name)}" class="${
+            (b.color||'').toLowerCase()===hex.toLowerCase()?'on':''}"
+            style="background:${hex}"></button>`).join('')}
+      </div>
+      <div class="tb-feed-foot">
+        <span>${L('+5 XP mỗi bữa','+5 XP a meal')}</span>
+        ${eating ? `<button class="btn btn-ghost" data-stop>${L('Dừng bữa','Stop the meal')}</button>` : ''}
+      </div>
+    </div>`;
+    wire();
+  }
+
+  function wire(){
+    // Everything here stops the click from bubbling. These handlers redraw or
+    // remove their own container, which detaches the node that was clicked —
+    // and any listener further up then sees a target belonging to nothing and
+    // makes its own wrong decision about where the click came from.
+    overlay.querySelector('[data-x]').onclick = (e)=>{ e.stopPropagation(); close(); };
+    overlay.onclick = (e)=>{ if(e.target === overlay){ e.stopPropagation(); close(); } };
+    // Choosing a dish is the end of the errand — he starts eating and the
+    // window gets out of the way so you can watch him do it.
+    overlay.querySelectorAll('[data-dish]').forEach(el=> el.onclick = (e)=>{
+      e.stopPropagation();
+      tobbyFeed(el.dataset.dish);
+      close();
+      const p = document.getElementById('tobbyPanel');
+      if(p && !p.hidden) tobbyOpenPanel({ quiet:true });   // the button relabels
+    });
+    // Colour is not, so the window stays and redraws to show the new choice.
+    overlay.querySelectorAll('[data-col]').forEach(el=> el.onclick = (e)=>{
+      e.stopPropagation();
+      TobbyBowl.setColor(el.dataset.col);
+      draw();
+    });
+    const stop = overlay.querySelector('[data-stop]');
+    if(stop) stop.onclick = (e)=>{
+      e.stopPropagation();
+      tobbyEndMeal({ cancel:true });
+      draw();
+      const p = document.getElementById('tobbyPanel');
+      if(p && !p.hidden) tobbyOpenPanel({ quiet:true });
+    };
+  }
+
+  draw();
+  document.body.appendChild(overlay);
+  const esc2 = (e)=>{ if(e.key === 'Escape'){ close(); document.removeEventListener('keydown', esc2); } };
+  document.addEventListener('keydown', esc2);
+}
+
 function wireTobby(){
   const dock = document.getElementById('tobbyDock');
   const body = document.getElementById('tobbyBody');
@@ -14422,6 +14494,14 @@ function wireTobby(){
 
   document.addEventListener('click', (e)=>{
     const p = document.getElementById('tobbyPanel');
+    // A click inside a modal the panel itself opened is not a click away from
+    // the panel. Without this, opening the feeding window closed the panel
+    // behind it, so cancelling the window left you with nothing.
+    // `isConnected` matters as much as the overlay test: a handler that redraws
+    // its own container detaches the clicked node before this runs, and a
+    // detached node's closest() is null — so the click would read as coming
+    // from nowhere, which is not "outside the panel" either.
+    if(e.target.closest && (e.target.closest('.overlay') || !e.target.isConnected)) return;
     if(p && !p.hidden && !p.contains(e.target) && !dock.contains(e.target)) tobbyClosePanel();
   });
   document.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ tobbyClosePanel(); tobbyHush(); } });
