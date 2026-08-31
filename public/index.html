@@ -13970,7 +13970,7 @@ function tobbyPlayClip(clipName, ms){
  *  "broth, pale noodles, dark slices" without hand-modelling a bowl of phở. */
 const TB_BOWL_FOODS = [
   ['empty',   '🍽️', 'Bát không', []],
-  ['water',   '💧', 'Nước',      [[0x53AEE0, 1, 0.00, 2.55, 0.26]]],
+  ['water',   '💧', 'Nước',      [[0x53AEE0, 1, 0.00, 1.84, 0.62]]],
   ['kibble',  '🌰', 'Hạt',       [[0xB4712F,22,0.72,0.34,0.55],[0x8A5220,10,0.60,0.30,0.78]]],
   ['bone',    '🦴', 'Xương',     [[0xEDE3D2, 7,0.55,0.46,0.55],[0xD8C9AF, 4,0.40,0.34,0.82]]],
   ['xoi',     '🍚', 'Xôi xéo',   [[0xF2C744,18,0.68,0.38,0.55],[0xE08A2B, 8,0.44,0.32,0.86]]],
@@ -13983,6 +13983,19 @@ const TB_BOWL_EAT_MS = 30000;     // the brief's thirty seconds
 const TB_BOWL_XP = 5;
 
 const TB_BOWL_GLB = 'assets/tobby/tobby-food-bowl.glb';
+/* Tobby's own lens and view direction. The bowl borrows both so the two
+   corners of the screen read as one world rather than two unrelated renders. */
+const TB_CAM_FOV = 30;
+const TB_CAM_DIR = [0.30, 0.62, 1.06];
+/* The bowl, in Tobby-world units. His body is 0.276 across; a dog bowl is a
+   little over half that. */
+const TB_BOWL_WORLD_W = 0.17;
+/* Distance multiplier on the bounding-sphere fit. The sphere circumscribes the
+   corners of the box, which are never the widest part on screen, so fitting the
+   sphere exactly leaves the bowl using barely half its little canvas and
+   reading as a stamp rather than a bowl. Backing this off fills about three
+   quarters of the frame with margin still to spare. */
+const TB_BOWL_FIT = 0.86;
 const TobbyBowl = {
   ready:false, loading:false, failed:false,
   THREE:null, renderer:null, scene:null, camera:null, root:null,
@@ -14025,21 +14038,56 @@ const TobbyBowl = {
       this.root.traverse(o=>{ if(o.isMesh && o.material) o.material = o.material.clone(); });
       this.scene.add(this.root);
 
-      // Frame to the model's real bounds, and look DOWN into it — side-on, the
-      // bowl's own walls hide whatever is in it, which is the only thing it
-      // has to say.
-      const box = new T.Box3().setFromObject(this.root);
+      // Normalise the bowl into Tobby's world. The supplied model is authored
+      // at 0.9 units across while his whole body is 0.276 — over three times
+      // his width — so at native scale it reads as a bathtub. Rescaled to a
+      // fraction of his body, it is a dog bowl again.
+      let box = new T.Box3().setFromObject(this.root);
+      let size = box.getSize(new T.Vector3());
+      const native = Math.max(size.x, size.z) || 1;
+      this.root.scale.setScalar(TB_BOWL_WORLD_W / native);
+      this.root.updateMatrixWorld(true);
+
+      box = new T.Box3().setFromObject(this.root);
       const centre = box.getCenter(new T.Vector3());
-      const size = box.getSize(new T.Vector3());
+      size = box.getSize(new T.Vector3());
       this.root.position.sub(centre);
+      this.root.updateMatrixWorld(true);
       this.reach = Math.max(size.x, size.y, size.z) || 1;
       this.rim = box.max.y - centre.y;
-      this.camera.position.set(0, this.reach * 1.15, this.reach * 0.95);
-      this.camera.lookAt(0, 0, 0);
-      this.camera.updateProjectionMatrix();
+      this.radius = size.length() * 0.5;            // bounding sphere, for the fit
+      this.frame();
+
+      // The basin, measured off the model's own inner surface rather than
+      // taken as a fraction of the outside. A bowl is mostly wall and foot:
+      // guessing put the dinner at a third of the width when the opening is
+      // nearer three quarters, and sat it on the outside floor rather than in
+      // the basin.
+      const inner = new T.Box3(); let found = false;
+      this.root.traverse(o=>{
+        if(o.isMesh && o.material && /inner/i.test(o.material.name||'')){ inner.expandByObject(o); found = true; }
+      });
+      if(found){
+        this.inner = Math.max(inner.max.x, inner.max.z, -inner.min.x, -inner.min.z);
+        this.floor = inner.max.y;              // the surface food would rest on
+      }else{
+        this.inner = Math.max(size.x, size.z) * 0.36;
+        this.floor = box.min.y + size.y * 0.33;
+      }
+      // Seen from Tobby's low angle the near rim hides the basin floor, so a
+      // serving that stopped at the rim would be an empty-looking bowl. Food
+      // heaps just past it, the way a full bowl actually looks.
+      this.top = (box.max.y - centre.y) + size.y * 0.09;
 
       this.foodGroup = new T.Group();
       this.root.add(this.foodGroup);
+      // Root is scaled to a fifth of the model's authored size, so anything
+      // parented to it inherits that. Cancelling the scale here lets the food
+      // be built in the same world units the cavity was measured in — without
+      // this the dishes came out at a tenth of the bowl, a crumb in a basin.
+      const rs = this.root.scale.x || 1;
+      this.foodGroup.scale.setScalar(1 / rs);
+      this.foodGroup.position.copy(this.root.position).multiplyScalar(-1 / rs);
 
       this.renderer = new T.WebGLRenderer({ alpha:true, antialias:true });
       this.renderer.setClearAlpha(0);
@@ -14053,12 +14101,151 @@ const TobbyBowl = {
     }
   },
 
+  /** Same lens and same angle as Tobby, then pulled back far enough that the
+   *  whole bowl is inside the frustum.
+   *
+   *  Before this it used a different fov from a near-top-down position and a
+   *  hard-coded aspect, so the bowl was cut off on every edge (projected to
+   *  x -1.22..1.22, y -1.48..0.79 against a -1..1 frustum) and read as a
+   *  different scene from the dog standing next to it. */
+  frame(){
+    if(!this.camera || !this.root) return;
+    const T = this.THREE;
+    const el = this.container;
+    const a = el ? Math.max(0.4, el.clientWidth / Math.max(1, el.clientHeight)) : 1.23;
+    this.camera.fov = TB_CAM_FOV;
+    this.camera.aspect = a;
+    // Distance that fits the bounding sphere both ways round. Vertical fov is
+    // the given one; horizontal follows from the aspect.
+    const vr = (TB_CAM_FOV * Math.PI/180) / 2;
+    const hr = Math.atan(Math.tan(vr) * a);
+    const r = (this.radius || 0.2) * 1.06;
+    const d = Math.max(r / Math.sin(vr), r / Math.sin(hr)) * TB_BOWL_FIT;
+    // Tobby's own view direction, normalised — the two corners then read as
+    // one world seen from one place.
+    const dir = new T.Vector3(TB_CAM_DIR[0], TB_CAM_DIR[1], TB_CAM_DIR[2]).normalize();
+    this.camera.position.copy(dir.multiplyScalar(d));
+    this.camera.lookAt(0, 0, 0);
+    this.camera.updateProjectionMatrix();
+  },
+
   attach(container){
     if(!this.ready || !container) return;
     this.container = container;
     container.appendChild(this.renderer.domElement);
     const r = container.getBoundingClientRect();
     this.renderer.setSize(Math.max(32, r.width|0), Math.max(28, r.height|0), false);
+    this.frame();          // the aspect is only knowable once it is in the DOM
+  },
+
+  /** Build one dish as voxels into `group`, fitted to a measured basin:
+   *  `fit` is {r, floor, top} — opening radius, the surface the food rests on,
+   *  and how high it may heap. Shared by the corner bowl and by prop_bowl
+   *  inside Tobby's own model, so what he is eating is always what you served.
+   *  Both bowls are different sizes, which is exactly why the geometry is
+   *  passed in rather than assumed. */
+  makeFood(kind, group, fit, T){
+    const R = fit.r, floor = fit.floor, rise = Math.max(fit.top - fit.floor, R * 0.4);
+    while(group.children.length){
+      const c = group.children.pop();
+      c.geometry && c.geometry.dispose();
+      c.material && c.material.dispose();
+      group.remove(c);
+    }
+    const def = TB_BOWL_FOODS.find(f=>f[0]===kind);
+    if(!def || !def[3] || !def[3].length) return 0;
+    let seed = 0; for(const ch of kind) seed = (seed*31 + ch.charCodeAt(0)) >>> 0;
+    const rnd = ()=> ((seed = (seed*1664525 + 1013904223) >>> 0) / 4294967296);
+    let n = 0;
+    def[3].forEach(([colour, count, spread, size, height])=>{
+      const pool = count === 1;
+      const s = pool ? R * Math.min(size, 1.84) : R * size;
+      const geo = new T.BoxGeometry(s, s * (pool ? 0.22 : 0.85), s);
+      const mat = new T.MeshStandardMaterial({
+        color:colour, roughness:0.72, metalness:0.02,
+        transparent:pool, opacity: pool ? 0.92 : 1,
+      });
+      for(let i=0;i<count;i++){
+        const m = new T.Mesh(geo, mat);
+        // Height runs from the basin floor to the heap line, so the same dish
+        // description fills a big bowl and a small one alike.
+        const y = floor + height * rise;
+        if(pool) m.position.set(0, y, 0);
+        else{
+          const a = rnd()*Math.PI*2, d = Math.sqrt(rnd()) * R * spread;
+          m.position.set(Math.cos(a)*d, y + rnd()*s*0.25, Math.sin(a)*d);
+          m.rotation.y = rnd()*Math.PI;
+        }
+        group.add(m); n++;
+      }
+    });
+    return n;
+  },
+
+  /** Bounding box of part of a subtree, in `base`'s OWN local frame.
+   *
+   *  Walks the local matrices down from `base` rather than inverting its world
+   *  matrix. That matters here because prop_bowl is keyed to scale 0 whenever
+   *  Tobby is not eating: inverting a singular matrix yields the zero matrix,
+   *  which collapsed every measurement to a point at the origin and served him
+   *  a dish of size nothing. */
+  localBox(base, want, T){
+    const box = new T.Box3();
+    (function walk(o, m){
+      const mm = o === base ? m : new T.Matrix4().multiplyMatrices(m, o.matrix);
+      if(o.isMesh && o.geometry && want(o)){
+        o.geometry.computeBoundingBox();
+        const b = o.geometry.boundingBox.clone();
+        b.applyMatrix4(mm);
+        box.union(b);
+      }
+      o.children.forEach(c=> walk(c, mm));
+    })(base, new T.Matrix4());
+    return box;
+  },
+
+  /** Put the served dish inside prop_bowl in Tobby's model, so the
+   *  Tobby_EatFromBowl clip shows him eating what was actually served.
+   *
+   *  The rig ships its own bowl of kibble. Rather than guess where food belongs
+   *  inside it, the served dish is fitted to the volume that kibble occupies —
+   *  the rig already knows, and the eating animation is keyed to it. The
+   *  built-in kibble is then hidden, so ordering phở does not get him a bowl of
+   *  phở sitting in a bowl of biscuits. */
+  syncToTobby(kind){
+    if(!Tobby3D.ready || !this.THREE) return false;
+    const prop = Tobby3D.root.getObjectByName('prop_bowl');
+    if(!prop) return false;
+    const T = this.THREE;
+    if(!this._tobbyFood){
+      this._tobbyFood = new T.Group();
+      this._tobbyFood.name = 'tb_served_food';
+      (prop.getObjectByName('bowl_contents') || prop).add(this._tobbyFood);
+    }
+    const mine = this._tobbyFood;
+    const isRigFood = o=> /^food_/.test(o.name);
+    const inMine = o=>{ let p=o; while(p){ if(p===mine) return true; p=p.parent; } return false; };
+
+    let box = this.localBox(prop, o=> isRigFood(o) && !inMine(o), T);
+    if(box.isEmpty()) box = this.localBox(prop, o=> !inMine(o), T);   // no rig food to copy
+    if(box.isEmpty()) return false;
+
+    const centre = box.getCenter(new T.Vector3());
+    const size = box.getSize(new T.Vector3());
+    // Placed where the rig's own food sits. `makeFood` builds around the
+    // group's origin, so the offset goes on the group and the heights stay
+    // absolute within it.
+    mine.position.set(centre.x, 0, centre.z);
+    this.makeFood(kind, mine, {
+      r: Math.max(size.x, size.z) * 0.5,
+      floor: box.min.y,
+      top: box.max.y,
+    }, T);
+
+    prop.traverse(o=>{ if(o.isMesh && isRigFood(o) && !inMine(o)) o.visible = false; });
+    // prop_bowl's own scale is keyed to zero outside the eating clip, so the
+    // food rides that automatically and never floats about on its own.
+    return true;
   },
 
   /** Rebuild the contents for the current dish. Deterministic: the same dish
@@ -14067,35 +14254,11 @@ const TobbyBowl = {
   buildFood(kind){
     const T = this.THREE;
     if(!T || !this.foodGroup) return;
-    while(this.foodGroup.children.length){
-      const c = this.foodGroup.children.pop();
-      c.geometry && c.geometry.dispose();
-      c.material && c.material.dispose();
-      this.foodGroup.remove(c);
-    }
-    const def = TB_BOWL_FOODS.find(f=>f[0]===kind);
-    if(!def || !def[3] || !def[3].length) return;
-    const R = this.reach * 0.16;              // bowl interior radius, roughly
-    let seed = 0; for(const ch of kind) seed = (seed*31 + ch.charCodeAt(0)) >>> 0;
-    const rnd = ()=> ((seed = (seed*1664525 + 1013904223) >>> 0) / 4294967296);
-    def[3].forEach(([colour, count, spread, size, height])=>{
-      const s = R * size;
-      const geo = new T.BoxGeometry(s, s * (count===1 ? 0.35 : 1), s);
-      const mat = new T.MeshStandardMaterial({
-        color:colour, roughness:0.72, metalness:0.02,
-        transparent: count===1, opacity: count===1 ? 0.92 : 1,
-      });
-      for(let i=0;i<count;i++){
-        const m = new T.Mesh(geo, mat);
-        if(count === 1){ m.position.set(0, this.rim - R*(1-height)*1.1, 0); }
-        else{
-          const a = rnd()*Math.PI*2, d = Math.sqrt(rnd()) * R * spread;
-          m.position.set(Math.cos(a)*d, this.rim - R*(1-height)*1.1 + rnd()*s*0.3, Math.sin(a)*d);
-          m.rotation.y = rnd()*Math.PI;
-        }
-        this.foodGroup.add(m);
-      }
-    });
+    // World units — foodGroup cancels root's scale, so these are the same
+    // numbers the cavity was measured in.
+    this.makeFood(kind, this.foodGroup, {
+      r: this.inner, floor: this.floor, top: this.top,
+    }, T);
   },
 
   apply(){
@@ -14103,6 +14266,7 @@ const TobbyBowl = {
     const kind = this.state().kind || 'empty';
     const def = TB_BOWL_FOODS.find(f=>f[0]===kind) || TB_BOWL_FOODS[0];
     this.buildFood(kind);
+    this.syncToTobby(kind);          // he eats what was served
     if(this.container){
       this.container.dataset.state = kind;
       this.container.title = def[2];
@@ -14146,7 +14310,9 @@ let tbFeedTimer = 0, tbFeedReturnX = null;
 /** Fill the bowl and bring Tobby over to it. */
 function tobbyFeed(kind){
   const bowl = TobbyBowl.state();
-  if(kind === 'empty'){ bowl.kind = 'empty'; persist(); TobbyBowl.apply(); return; }
+  // Taking the bowl away goes through the same exit as a finished meal, so the
+  // pending timer dies with it and he walks home instead of standing there.
+  if(kind === 'empty'){ tobbyEndMeal({ cancel:true }); return; }
   if(bowl.kind !== 'empty') return;               // already full — one meal at a time
 
   bowl.kind = kind;
@@ -14187,16 +14353,25 @@ function tobbyFeed(kind){
     tbFeedTimer = setTimeout(tobbyEndMeal, TB_BOWL_EAT_MS);
   }, secs*1000 + 60);
 }
-/** Meal over: empty the bowl, walk him home, pay the XP. */
-function tobbyEndMeal(){
+/** Meal over: empty the bowl, walk him home, pay the XP.
+ *
+ *  Clearing the timer is not tidiness. Without it a meal that ended any way
+ *  other than by its own timeout — emptied from the menu, or ended here — left
+ *  a live thirty-second timer behind, which then fired during the NEXT meal and
+ *  cut it short while paying out its XP early. */
+function tobbyEndMeal(opts){
+  clearTimeout(tbFeedTimer); tbFeedTimer = 0;
   const bowl = TobbyBowl.state();
   const wasFed = bowl.kind !== 'empty';
   bowl.kind = 'empty';
   persist();
   TobbyBowl.apply();
-  if(!wasFed) return;
-
-  try{ tobbyGainXP(TB_BOWL_XP, 'bowl:feed'); }catch(e){}
+  // He may still be standing at the bowl even when there was nothing in it —
+  // emptying it from the menu mid-meal takes this path — and leaving him
+  // stranded there is worse than an unpaid meal.
+  if(!wasFed && tbFeedReturnX == null) return;
+  // Taking the bowl away is not a meal — he only gets paid for one he finished.
+  if(wasFed && !(opts && opts.cancel)) try{ tobbyGainXP(TB_BOWL_XP, 'bowl:feed'); }catch(e){}
   const dock = document.getElementById('tobbyDock');
   if(dock && tbFeedReturnX != null){
     const from = parseFloat(dock.style.left) || 0;
