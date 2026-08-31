@@ -1376,6 +1376,36 @@ a{color:inherit;}
   animation:wxSweep linear infinite;}
 @keyframes wxSweep{ to{ transform:translateX(calc(100vw + 280px)); } }
 
+/* ---------- Tobby's bowl ----------
+   Bottom-LEFT, opposite Tobby's own corner so he has somewhere to walk to.
+   Lifted clear of the mobile navigation bar rather than floated over it — a
+   decoration must never sit on top of a control. */
+.tb-bowl{
+  /* Clear of the navigation, and on desktop the navigation IS the left rail —
+     so "bottom left" means the bottom-left of the WORK area, just past the
+     236px sidebar, not the bottom-left of the window where it would sit on top
+     of the nav items. */
+  position:fixed; left:252px; bottom:18px; width:64px; height:52px;
+  z-index:95; cursor:context-menu; pointer-events:auto;
+  filter:drop-shadow(0 6px 10px rgba(0,0,0,.28));
+  transition:transform .25s ease;
+}
+.tb-bowl:hover{ transform:translateY(-2px) scale(1.04); }
+.tb-bowl canvas{ display:block; width:100%; height:100%; }
+.tb-bowl[data-state="empty"]{ opacity:.85; }
+/* A quiet nudge that it is interactive, shown only until it is first used. */
+.tb-bowl[data-hint="1"]::after{
+  content:''; position:absolute; inset:-4px; border-radius:14px;
+  border:1.5px dashed var(--brand); opacity:.5;
+  animation:tbBowlHint 2.6s ease-in-out infinite;
+}
+@keyframes tbBowlHint{ 0%,100%{opacity:.18;} 50%{opacity:.55;} }
+@media (max-width:699px){
+  /* The bottom bar is 62px; clearing it by 16 keeps the bowl tappable and the
+     navigation untouched. */
+  .tb-bowl{ left:12px; bottom:78px; width:54px; height:44px; }
+}
+
 /* The voxel sun/moon from the GLB. Same corner the CSS one occupied, same
    fixed anchoring, so it holds still while the page scrolls under it. Its
    `top` and size are set per hour and per moon phase from script. */
@@ -1476,6 +1506,25 @@ a{color:inherit;}
 /* =========================================================
    TASK CONTEXT MENU · COLOUR · ALARM · FREEZE
    ========================================================= */
+/* The bowl's menu. Its own rules rather than a borrowed class — `.ctx-menu`
+   does not exist in this sheet, and a menu styled by a selector nothing
+   defines is an invisible menu. Built from the same tokens as every popover. */
+.tb-bowl-menu{
+  min-width:186px; padding:6px; border-radius:14px;
+  background:var(--surface); border:1px solid var(--border);
+  box-shadow:var(--shadow-lg); display:flex; flex-direction:column; gap:2px;
+}
+.tb-bowl-menu button{
+  display:flex; align-items:center; gap:9px; width:100%;
+  padding:9px 11px; border:0; border-radius:9px; background:transparent;
+  color:var(--text-1); font-size:13px; font-weight:600; text-align:left; cursor:pointer;
+}
+.tb-bowl-menu button:hover:not(:disabled){ background:var(--surface-2); }
+.tb-bowl-menu button:disabled{ opacity:.38; cursor:not-allowed; }
+.tb-bowl-menu .ctx-note{
+  padding:6px 11px 3px; font-size:11px; color:var(--text-3);
+  border-top:1px solid var(--border); margin-top:3px;
+}
 .task-ctx{min-width:250px;}
 .freeze-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:5px; padding:0 8px 4px;}
 .freeze-opt{border:1px solid var(--border); background:var(--surface-2); color:var(--text-2);
@@ -4629,6 +4678,10 @@ function render(){
          a three-dot button back in his spot. He is the permanent inhabitant of
          that corner now; everything the ⋯ opened lives in his panel. -->
     ${tobbyDockHtml()}
+    <!-- Opposite corner from Tobby, so the walk over to it is a real journey. -->
+    <div class="tb-bowl" id="tobbyBowl" data-state="empty"
+         data-hint="${(tobby().bowl && tobby().bowl.fedCount) ? '0' : '1'}"
+         title="${esc(TB_L('Chuột phải để chọn món','Right-click to choose food'))}"></div>
     <div class="composer-pop" id="composerPop" hidden>
       <div class="composer-pop-head">✏️ Hôm nay cần làm gì? <button class="close-x" id="composerPopClose">✕</button></div>
       <div id="composerPopBody"></div>
@@ -12758,9 +12811,23 @@ function tobbyLoop(ts){
   if(Tobby3D.ready) Tobby3D.update(dt);
   // The sky body rides the same loop, at a third of the rate. It is a sun: it
   // does not need 60fps, and this way it costs nothing on a hidden tab either.
-  if(SkyBody.ready && (tbSkyFrame = (tbSkyFrame+1) % 3) === 0){
+  // Third-rate slot for the ambient 3D. Counted once and shared, so the bowl
+  // is NOT gated behind the sky: the weather layer only exists when a scene is
+  // running, and nesting the bowl inside it meant a clear-sky-less session
+  // never built the bowl at all.
+  const slow = (tbSkyFrame = (tbSkyFrame+1) % 3) === 0;
+  if(slow && SkyBody.ready){
     SkyBody.applyIfHourChanged();   // an integer compare; only acts on rollover
     SkyBody.tick();
+  }
+  if(slow){
+    if(TobbyBowl.ready) TobbyBowl.tick();
+    else if(Tobby3D.ready){
+      // Tobby's model may still have been loading when the dock was wired, so
+      // this is the second chance to build the bowl from it.
+      const el = document.getElementById('tobbyBowl');
+      if(el && !el.querySelector('canvas')) TobbyBowl.build(el);
+    }
   }
   if(tbAnim.visible && !document.hidden) tbAnim.raf = requestAnimationFrame(tobbyLoop);
 }
@@ -12794,6 +12861,14 @@ function tobbyPaint(){
       Tobby3D.container = stage3d;
       stage3d.appendChild(Tobby3D.renderer.domElement);
       Tobby3D.resize();
+    }
+    // The bowl is cloned out of this same model, so the moment the model is up
+    // is the moment it can exist. Done here rather than from the animation
+    // loop: that loop stops for a hidden tab, and a bowl that only appears if
+    // you happened to be watching is not a feature.
+    if(Tobby3D.ready && !TobbyBowl.ready){
+      const bowlEl = document.getElementById('tobbyBowl');
+      if(bowlEl && !bowlEl.querySelector('canvas')) TobbyBowl.build(bowlEl);
     }
     if(!Tobby3D.ready && !Tobby3D.loading){
       Tobby3D.init(stage3d).then(ok=>{
@@ -13856,6 +13931,252 @@ function tobbyDrawAvatar(canvas){
   ctx.drawImage(src, (canvas.width-w)/2, (canvas.height-h)/2, w, h);
 }
 
+/** Play one named GLB clip directly and hold it, for the cases where the
+ *  emotion/pose vocabulary has no word for what he is doing — eating is a clip,
+ *  not a mood. Raises the animation priority so idle behaviour cannot cut in. */
+function tobbyPlayClip(clipName, ms){
+  tbAnim.priority = TB_PRIO.ACTIVITY;
+  tbAnim.until = performance.now() + (ms || 2000);
+  if(Tobby3D.ready) Tobby3D.play(clipName, { loop:true });
+}
+
+/* =========================================================
+   TOBBY'S BOWL
+   ---------------------------------------------------------
+   The GLB ships `prop_bowl` (with a `bowl_contents` group of kibble) and a
+   `Tobby_EatFromBowl` clip. The bowl's scale is keyed to zero in every other
+   clip, exactly like prop_workstation — so inside Tobby's own viewport it
+   stays invisible until he eats, which is what we want.
+
+   Here it is CLONED out of the loaded model into its own tiny scene in the
+   opposite corner. Cloning costs no second download, and it means the bowl on
+   screen is the same bowl the animation reaches for. The clone is not driven
+   by the mixer, so its scale is set explicitly — a cloned node inherits
+   whatever the keyframes happened to leave it at, which is usually zero.
+
+   Water: the model has kibble and no liquid. Rather than invent a mesh, the
+   contents are flattened and tinted — a shallow blue surface in a voxel bowl
+   reads as water, and it is the real geometry rather than a fake.
+   ========================================================= */
+const TB_BOWL_FOODS = [
+  ['empty', '🍽️', 'Bát không',   null],
+  ['food',  '🦴', 'Thức ăn hạt', 0xC98A4B],
+  ['water', '💧', 'Nước',        0x4FA8DC],
+  ['treat', '🍖', 'Thưởng',      0xD9534F],
+];
+const TB_BOWL_EAT_MS = 30000;     // the brief's thirty seconds
+const TB_BOWL_XP = 5;
+
+const TobbyBowl = {
+  ready:false, renderer:null, scene:null, camera:null, root:null,
+  contents:null, contentMats:[], spin:0,
+
+  state(){
+    const T = tobby();
+    if(!T.bowl) T.bowl = { kind:'empty', fedCount:0, lastFedAt:null };
+    return T.bowl;
+  },
+
+  /** Built from Tobby3D's already-loaded scene — no second fetch. */
+  build(container){
+    if(this.ready || !Tobby3D.ready || !container) return;
+    const T = Tobby3D.THREE;
+    const src = Tobby3D.root.getObjectByName('prop_bowl');
+    if(!src) return;                                   // older model: no bowl, no feature
+
+    this.scene = new T.Scene();
+    this.camera = new T.PerspectiveCamera(32, 1.25, 0.1, 20);
+    this.camera.position.set(0, 1.05, 2.5);
+    this.camera.lookAt(0, 0.1, 0);
+    this.scene.add(new T.AmbientLight(0xffffff, 1.25));
+    const key = new T.DirectionalLight(0xffffff, 1.7);
+    key.position.set(-1.6, 2.2, 2.0);
+    this.scene.add(key);
+
+    this.root = src.clone(true);
+    // Keyframes leave the prop at scale 0 in most clips; the clone inherits
+    // that frozen value, so it must be set rather than assumed.
+    this.root.scale.setScalar(1);
+    this.root.position.set(0, 0, 0);
+    this.root.visible = true;
+    this.root.traverse(o=>{
+      if(o.isMesh && o.material){ o.material = o.material.clone(); o.visible = true; }
+    });
+    this.contents = this.root.getObjectByName('bowl_contents');
+    this.contentMats = [];
+    if(this.contents) this.contents.traverse(o=>{ if(o.isMesh) this.contentMats.push(o.material); });
+    // Bank the authored kibble colours so "food" is a restore, not a guess.
+    this.contentMats.forEach(m=>{ m.userData.baseColor = m.color ? m.color.clone() : null; });
+    this.scene.add(this.root);
+
+    // Frame the camera to the bowl's real bounds instead of guessing. The prop
+    // is 0.28 units across and authored off-origin at z≈0.23; a fixed camera
+    // 2.5 units back rendered it as ninety-odd pixels of brown mush. Centre it,
+    // then stand back by its own size.
+    const box = new T.Box3().setFromObject(this.root);
+    const centre = box.getCenter(new T.Vector3());
+    const size = box.getSize(new T.Vector3());
+    this.root.position.sub(centre);
+    const reach = Math.max(size.x, size.y, size.z) || 0.3;
+    // High and looking down INTO the bowl. From a side-on angle the walls hide
+    // the contents entirely — food, water and empty all rendered within three
+    // pixels of each other, so the one thing the bowl has to communicate was
+    // invisible. A dish is read from above.
+    this.camera.position.set(0, reach * 1.85, reach * 1.55);
+    this.camera.lookAt(0, 0, 0);
+    this.camera.updateProjectionMatrix();
+
+    this.renderer = new T.WebGLRenderer({ alpha:true, antialias:true });
+    this.renderer.setClearAlpha(0);
+    this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
+    this.ready = true;
+    this.attach(container);
+    this.apply();
+  },
+
+  attach(container){
+    if(!this.ready || !container) return;
+    this.container = container;
+    container.appendChild(this.renderer.domElement);
+    const r = container.getBoundingClientRect();
+    this.renderer.setSize(Math.max(32, r.width|0), Math.max(28, r.height|0), false);
+  },
+
+  /** Paint whatever the bowl currently holds. */
+  apply(){
+    if(!this.ready) return;
+    const kind = this.state().kind || 'empty';
+    const def = TB_BOWL_FOODS.find(f=>f[0]===kind) || TB_BOWL_FOODS[0];
+    if(this.contents){
+      this.contents.visible = kind !== 'empty';
+      // Water sits as a shallow surface; solids keep their authored shape.
+      this.contents.scale.set(1, kind==='water' ? 0.34 : 1, 1);
+      this.contentMats.forEach(m=>{
+        if(!m.color) return;
+        if(kind === 'food' && m.userData.baseColor) m.color.copy(m.userData.baseColor);
+        else if(def[3] != null) m.color.setHex(def[3]);
+        if(m.emissive) m.emissive.setHex(kind==='water' ? 0x123047 : 0x000000);
+        m.transparent = kind==='water';
+        m.opacity = kind==='water' ? 0.86 : 1;
+      });
+    }
+    if(this.container){
+      this.container.dataset.state = kind;
+      this.container.title = def[2];
+    }
+    this.render();
+  },
+
+  render(){ if(this.ready) this.renderer.render(this.scene, this.camera); },
+  tick(){
+    if(!this.ready || document.hidden || tbReduceMotion()) return;
+    if(this.state().kind === 'empty') return;      // a still bowl needs no frames
+    this.spin += 0.01;
+    this.root.rotation.y = Math.sin(this.spin) * 0.12;
+    this.render();
+  }
+};
+
+/* ---------- feeding ---------- */
+let tbFeedTimer = 0, tbFeedReturnX = null;
+/** Fill the bowl and bring Tobby over to it. */
+function tobbyFeed(kind){
+  const bowl = TobbyBowl.state();
+  if(kind === 'empty'){ bowl.kind = 'empty'; persist(); TobbyBowl.apply(); return; }
+  if(bowl.kind !== 'empty') return;               // already full — one meal at a time
+
+  bowl.kind = kind;
+  bowl.fedCount = (bowl.fedCount||0) + 1;
+  bowl.lastFedAt = nowISO();
+  persist();
+  TobbyBowl.apply();
+
+  const dock = document.getElementById('tobbyDock');
+  const el = document.getElementById('tobbyBowl');
+  if(!dock || !el){ tobbyEndMeal(); return; }
+
+  // Remember where he was standing so he can go back to exactly that spot.
+  tbFeedReturnX = parseFloat(dock.style.left) || 0;
+  const b = el.getBoundingClientRect();
+  const w = dock.offsetWidth || 76;
+  const to = Math.max(8, Math.min(window.innerWidth - w - 8, b.x + b.width/2 - w/2 + 40));
+  const dist = Math.abs(to - tbFeedReturnX);
+  const run = dist > 300;
+  const secs = run ? Math.min(1.6, 0.5 + dist/700) : Math.min(2.0, 0.5 + dist/260);
+
+  dock.dataset.facing = to < tbFeedReturnX ? 'left' : 'right';
+  tobbyFace(to < tbFeedReturnX ? -1 : 1, true);
+  tobbyPlay(tbAnim.emotion, 'ACTIVITY', secs*1000 + 300, run ? 'run' : 'walk');
+  dock.style.transition = `left ${secs}s cubic-bezier(.33,.02,.35,1)`;
+  dock.style.left = to + 'px';
+
+  clearTimeout(tbFeedTimer);
+  tbFeedTimer = setTimeout(()=>{
+    dock.style.transition = '';
+    if(Tobby3D.ready) Tobby3D.faceForward();
+    dock.dataset.facing = 'right';
+    // Eating outranks idle for the full thirty seconds, so nothing wanders in
+    // and interrupts the meal.
+    tobbyPlayClip('Tobby_EatFromBowl', TB_BOWL_EAT_MS);
+    tobbySay(TB_L('Cảm ơn cậu!','Thanks!'));
+    clearTimeout(tbFeedTimer);
+    tbFeedTimer = setTimeout(tobbyEndMeal, TB_BOWL_EAT_MS);
+  }, secs*1000 + 60);
+}
+/** Meal over: empty the bowl, walk him home, pay the XP. */
+function tobbyEndMeal(){
+  const bowl = TobbyBowl.state();
+  const wasFed = bowl.kind !== 'empty';
+  bowl.kind = 'empty';
+  persist();
+  TobbyBowl.apply();
+  if(!wasFed) return;
+
+  try{ tobbyGainXP(TB_BOWL_XP, 'bowl:feed'); }catch(e){}
+  const dock = document.getElementById('tobbyDock');
+  if(dock && tbFeedReturnX != null){
+    const from = parseFloat(dock.style.left) || 0;
+    const dist = Math.abs(tbFeedReturnX - from);
+    const secs = Math.min(1.8, 0.5 + dist/300);
+    dock.dataset.facing = tbFeedReturnX < from ? 'left' : 'right';
+    tobbyFace(tbFeedReturnX < from ? -1 : 1, true);
+    tobbyPlay('happy','ACTIVITY', secs*1000 + 400, 'walk');
+    dock.style.transition = `left ${secs}s cubic-bezier(.33,.02,.35,1)`;
+    dock.style.left = tbFeedReturnX + 'px';
+    setTimeout(()=>{
+      dock.style.transition = '';
+      tobby().x = tbFeedReturnX; persist();
+      if(Tobby3D.ready) Tobby3D.faceForward();
+      dock.dataset.facing = 'right';
+      tbFeedReturnX = null;
+      try{ tobbyRelax(); }catch(e){}
+    }, secs*1000 + 60);
+  }
+}
+/** The bowl's right-click menu. */
+function tobbyBowlMenu(x, y){
+  document.querySelectorAll('.tb-bowl-menu').forEach(m=>m.remove());
+  const busy = TobbyBowl.state().kind !== 'empty';
+  const m = document.createElement('div');
+  m.className = 'ctx-menu tb-bowl-menu';
+  m.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:400;`;
+  m.innerHTML = TB_BOWL_FOODS.map(([k,ico,label])=>
+    `<button data-food="${k}" ${busy && k!=='empty' ? 'disabled' : ''}>${ico} ${label}</button>`).join('')
+    + `<div class="ctx-note">${TB_L('+5 XP mỗi lần cho ăn','+5 XP each feed')}</div>`;
+  document.body.appendChild(m);
+  // Keep it on screen when the bowl sits in the very corner.
+  const r = m.getBoundingClientRect();
+  if(r.bottom > innerHeight) m.style.top = Math.max(8, innerHeight - r.height - 8) + 'px';
+  if(r.right > innerWidth)  m.style.left = Math.max(8, innerWidth - r.width - 8) + 'px';
+  m.querySelectorAll('[data-food]').forEach(b=> b.onclick = ()=>{
+    const k = b.dataset.food;
+    m.remove();
+    if(k === 'empty') tobbyEndMeal(); else tobbyFeed(k);
+  });
+  const away = (e)=>{ if(!m.contains(e.target)){ m.remove(); document.removeEventListener('pointerdown', away); } };
+  setTimeout(()=> document.addEventListener('pointerdown', away), 0);
+}
+
 function wireTobby(){
   const dock = document.getElementById('tobbyDock');
   const body = document.getElementById('tobbyBody');
@@ -13887,6 +14208,27 @@ function wireTobby(){
     tobbyTravelTo(e.clientX);
   };
   document.addEventListener('dblclick', tbDocDblHandler);
+
+  /* --- the bowl --- */
+  const bowlEl = document.getElementById('tobbyBowl');
+  if(bowlEl){
+    // Built from the model Tobby already loaded; if he is still loading, the
+    // paint below picks it up on a later render.
+    if(!TobbyBowl.ready) TobbyBowl.build(bowlEl);
+    else { TobbyBowl.attach(bowlEl); TobbyBowl.apply(); }
+    bowlEl.oncontextmenu = (e)=>{ e.preventDefault(); tobbyBowlMenu(e.clientX, e.clientY); };
+    // Long-press is the right-click of a touchscreen; without it the whole
+    // feature would be unreachable on a phone.
+    let hold = 0;
+    bowlEl.addEventListener('touchstart', (e)=>{
+      hold = setTimeout(()=>{ const t=e.touches[0]; tobbyBowlMenu(t.clientX, t.clientY); }, 450);
+    }, {passive:true});
+    ['touchend','touchmove','touchcancel'].forEach(ev=>
+      bowlEl.addEventListener(ev, ()=> clearTimeout(hold), {passive:true}));
+    // A plain click opens the same menu — right-click is not discoverable and
+    // there is nothing else a click on a bowl could sensibly mean.
+    bowlEl.onclick = (e)=>{ e.stopPropagation(); tobbyBowlMenu(e.clientX, e.clientY); };
+  }
 
   // Restore his spot, clamped in case the window got narrower since last time.
   const T = tobby();
