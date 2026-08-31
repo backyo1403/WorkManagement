@@ -14707,11 +14707,7 @@ function wireTobby(){
   addEventListener('resize', tbOnResize, { passive:true });
   tobbyWatchTheme();
   tobbyStartWander();
-  // Right-click him for the same menu the bowl gives: what to serve and what
-  // colour the bowl is. Feeding him by asking HIM is the obvious gesture, and
-  // the bowl can be anywhere on the floor by now. His panel is unaffected — a
-  // plain click still opens it.
-  dock.addEventListener('contextmenu', (e)=>{ e.preventDefault(); tobbyBowlMenu(e.clientX, e.clientY); });
+  dock.addEventListener('contextmenu', (e)=>{ e.preventDefault(); tobbyOpenPanel(); });
 
   document.addEventListener('click', (e)=>{
     const p = document.getElementById('tobbyPanel');
