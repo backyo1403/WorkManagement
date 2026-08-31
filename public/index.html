@@ -1381,15 +1381,21 @@ a{color:inherit;}
    Lifted clear of the mobile navigation bar rather than floated over it — a
    decoration must never sit on top of a control. */
 .tb-bowl{
-  /* Clear of the navigation, and on desktop the navigation IS the left rail —
-     so "bottom left" means the bottom-left of the WORK area, just past the
-     236px sidebar, not the bottom-left of the window where it would sit on top
-     of the nav items. */
+  /* `left` and `top` are both set from script: the bowl is dragged along the
+     floor, and its base is lined up with Tobby's feet rather than with the
+     bottom of the window. These are only what it looks like before the first
+     placement runs — clear of the navigation, which on desktop IS the left
+     rail, so "bottom left" means the bottom-left of the WORK area just past
+     the 236px sidebar and not the corner of the window. */
   position:fixed; left:252px; bottom:18px; width:64px; height:52px;
-  z-index:95; cursor:context-menu; pointer-events:auto;
+  z-index:95; cursor:grab; pointer-events:auto; touch-action:none;
   filter:drop-shadow(0 6px 10px rgba(0,0,0,.28));
   transition:transform .25s ease;
 }
+.tb-bowl:active{ cursor:grabbing; }
+/* Dragging must not fight the placement transition, or the bowl lags a frame
+   behind the pointer the whole way across. */
+.tb-bowl[data-dragging="1"]{ transition:none; }
 .tb-bowl:hover{ transform:translateY(-2px) scale(1.04); }
 .tb-bowl canvas{ display:block; width:100%; height:100%; }
 .tb-bowl[data-state="empty"]{ opacity:.85; }
@@ -12773,6 +12779,12 @@ const TB_PRIO = { IDLE:0, AMBIENT:1, ACTIVITY:2, EMOTION:3, INTERACTION:4, CRITI
 const tbAnim = {
   emotion:'idle', pose:'sit', priority:0, until:0,
   t:0, blink:false, nextBlink:0, nextIdle:0, raf:0, last:0, visible:true,
+  // A specific clip to hold, by name, for cases no emotion-and-pose pair can
+  // express — eating out of the bowl is the one. It has to live HERE rather
+  // than be set straight on the 3D body, because tobbySync3D pushes this object
+  // at the body every frame: a clip set behind its back was overwritten on the
+  // very next frame, about two milliseconds later.
+  clip:null,
 };
 
 /** Ask Tobby to show something. Lower-priority requests are ignored while a
@@ -12781,6 +12793,7 @@ function tobbyPlay(emotion, priorityName, ms, pose){
   const p = TB_PRIO[priorityName] ?? TB_PRIO.EMOTION;
   const now = performance.now();
   if(p < tbAnim.priority && now < tbAnim.until) return false;
+  tbAnim.clip = null;                 // an ordinary pose replaces a held clip
   tbAnim.emotion = emotion;
   tbAnim.pose = pose || (emotion==='sleepy' ? 'sleep' : emotion==='celebrating' ? 'jump' : 'sit');
   tbAnim.priority = p;
@@ -12792,6 +12805,7 @@ function tobbyPlay(emotion, priorityName, ms, pose){
 function tobbyRelax(){
   tbAnim.priority = TB_PRIO.IDLE;
   tbAnim.until = 0;
+  tbAnim.clip = null;
   tbAnim.emotion = tobbyRestingEmotion();
   tbAnim.pose = tbAnim.emotion==='sleepy' ? 'sleep' : 'sit';
 }
@@ -12880,6 +12894,9 @@ function tobbyPaint(){
         if(!ok) return;
         document.getElementById('tobbyDock')?.setAttribute('data-3d','on');
         tobbySync3D();
+        // Only now is the foot line real rather than the dock-box guess, so the
+        // bowl gets put down again against it.
+        tobbyPlaceBowl();
       });
     }
     if(Tobby3D.ready){
@@ -12912,7 +12929,9 @@ function tobbySync3D(){
     Tobby3D._wornKey = wornKey;
     Tobby3D.setCosmetics(T.worn);
   }
-  Tobby3D.setEmotion(tbAnim.emotion, tbAnim.pose);
+  // A held clip outranks the emotion-and-pose pair, and expires with it.
+  if(tbAnim.clip && performance.now() < tbAnim.until) Tobby3D.play(tbAnim.clip, { loop:true });
+  else { tbAnim.clip = null; Tobby3D.setEmotion(tbAnim.emotion, tbAnim.pose); }
 }
 
 /** Pixel confetti. Restrained, short-lived, and skipped under reduced motion. */
@@ -13942,6 +13961,10 @@ function tobbyDrawAvatar(canvas){
 function tobbyPlayClip(clipName, ms){
   tbAnim.priority = TB_PRIO.ACTIVITY;
   tbAnim.until = performance.now() + (ms || 2000);
+  // Recorded on tbAnim, not pushed at the body: tobbySync3D re-asserts tbAnim
+  // every frame, so a clip set directly on the body lasted one frame before the
+  // walk cycle came back and took the meal with it.
+  tbAnim.clip = clipName;
   if(Tobby3D.ready) Tobby3D.play(clipName, { loop:true });
 }
 
@@ -14127,6 +14150,19 @@ const TobbyBowl = {
     this.camera.position.copy(dir.multiplyScalar(d));
     this.camera.lookAt(0, 0, 0);
     this.camera.updateProjectionMatrix();
+
+    // Where the bowl's own base falls inside its canvas, as a fraction of the
+    // half-height. The element is bigger than the bowl drawn in it, so sitting
+    // the ELEMENT on the floor line leaves the bowl hovering above it. Food
+    // only ever raises the top, never the base, so measuring the whole root is
+    // safe and this stays correct whatever is being served.
+    const box = new T.Box3().setFromObject(this.root);
+    let low = 1;
+    for(const x of [box.min.x, box.max.x])
+      for(const y of [box.min.y, box.max.y])
+        for(const z of [box.min.z, box.max.z])
+          low = Math.min(low, new T.Vector3(x,y,z).project(this.camera).y);
+    this.ndcBottom = low;
   },
 
   attach(container){
@@ -14305,8 +14341,54 @@ const TobbyBowl = {
     this.render();
   }
 };
+/* ---------- where the bowl stands ---------- */
+/** The screen y of the floor Tobby is standing on.
+ *
+ *  Taken from where his own feet project, not from the bottom of the window.
+ *  His viewport is bigger than he is and sits above the navigation, so the
+ *  window edge is some way below the ground he is on — a bowl aligned to it
+ *  floats. Falls back to the dock's own box before the model has loaded. */
+function tobbyFootY(){
+  const dock = document.getElementById('tobbyDock');
+  const stage = document.getElementById('tobbyStage3D');
+  if(Tobby3D.ready && stage){
+    const r = stage.getBoundingClientRect();
+    if(r.height){
+      const T = Tobby3D.THREE;
+      // His rig origin, which sits on the floor — not the bottom of his
+      // bounding box, which lifts with his feet on every walk and eat frame and
+      // would leave the bowl bobbing by a pixel against him. The two agree
+      // exactly when he is standing still; only this one holds while he moves.
+      const y = Tobby3D.root.getWorldPosition(new T.Vector3()).project(Tobby3D.camera).y;
+      return r.top + (1 - y) / 2 * r.height;
+    }
+  }
+  return dock ? dock.getBoundingClientRect().bottom - 6 : innerHeight - 24;
+}
+/** Sit the bowl on that floor, at the x the user last left it.
+ *  Its base — not its box — is what gets lined up, so the bowl looks like it is
+ *  standing on the same ground as the dog rather than hovering over it. */
+function tobbyPlaceBowl(){
+  const el = document.getElementById('tobbyBowl');
+  if(!el) return;
+  const h = el.offsetHeight || 44, w = el.offsetWidth || 54;
+  const bowl = TobbyBowl.state();
+  if(bowl.x == null) bowl.x = Math.max(12, Math.min(innerWidth - w - 12, 252));
+  const x = Math.max(6, Math.min(innerWidth - w - 6, bowl.x));
+  // ndcBottom is the base's own inset inside the canvas, measured when the
+  // bowl was framed; -0.83 is what it measures to, used until it is known.
+  const inset = (-(TobbyBowl.ndcBottom == null ? -0.83 : TobbyBowl.ndcBottom)) * h/2;
+  el.style.left = x + 'px';
+  el.style.bottom = 'auto';
+  el.style.top = Math.round(tobbyFootY() - h/2 - inset) + 'px';
+}
+
 /* ---------- feeding ---------- */
 let tbFeedTimer = 0, tbFeedReturnX = null;
+/** True from the moment he reaches the bowl until the meal is over. While it
+ *  is set, the pointer handlers stop squaring him up — otherwise moving the
+ *  mouse away would turn him out of profile mid-mouthful. */
+let tbMealFacing = 0;
 /** Fill the bowl and bring Tobby over to it. */
 function tobbyFeed(kind){
   const bowl = TobbyBowl.state();
@@ -14343,8 +14425,17 @@ function tobbyFeed(kind){
   clearTimeout(tbFeedTimer);
   tbFeedTimer = setTimeout(()=>{
     dock.style.transition = '';
-    if(Tobby3D.ready) Tobby3D.faceForward();
-    dock.dataset.facing = 'right';
+    // He eats side-on, turned toward the bowl, and stays that way for the whole
+    // meal. Squaring up to the camera here — which is what he used to do — put
+    // him face-on to you with the bowl off to one side, so he read as chewing
+    // the air rather than eating out of it. The direction is taken from where
+    // he actually ended up, not from which way he set off, because the walk is
+    // clamped at the window edge and can land him on the other side of it.
+    const at = parseFloat(dock.style.left) || to;
+    const dir = (b.x + b.width/2) < (at + w/2) ? -1 : 1;
+    tbMealFacing = dir;
+    dock.dataset.facing = dir < 0 ? 'left' : 'right';
+    tobbyFace(dir, true);
     // Eating outranks idle for the full thirty seconds, so nothing wanders in
     // and interrupts the meal.
     tobbyPlayClip('Tobby_EatFromBowl', TB_BOWL_EAT_MS);
@@ -14361,6 +14452,7 @@ function tobbyFeed(kind){
  *  cut it short while paying out its XP early. */
 function tobbyEndMeal(opts){
   clearTimeout(tbFeedTimer); tbFeedTimer = 0;
+  tbMealFacing = 0;                    // he may look about again
   const bowl = TobbyBowl.state();
   const wasFed = bowl.kind !== 'empty';
   bowl.kind = 'empty';
@@ -14480,18 +14572,41 @@ function wireTobby(){
     if(!TobbyBowl.ready) TobbyBowl.build(bowlEl);
     else { TobbyBowl.attach(bowlEl); TobbyBowl.apply();
            if((tobby().bowl||{}).color) TobbyBowl.setColor(tobby().bowl.color); }
+    tobbyPlaceBowl();
     bowlEl.oncontextmenu = (e)=>{ e.preventDefault(); tobbyBowlMenu(e.clientX, e.clientY); };
-    // Long-press is the right-click of a touchscreen; without it the whole
-    // feature would be unreachable on a phone.
-    let hold = 0;
-    bowlEl.addEventListener('touchstart', (e)=>{
-      hold = setTimeout(()=>{ const t=e.touches[0]; tobbyBowlMenu(t.clientX, t.clientY); }, 450);
-    }, {passive:true});
-    ['touchend','touchmove','touchcancel'].forEach(ev=>
-      bowlEl.addEventListener(ev, ()=> clearTimeout(hold), {passive:true}));
-    // A plain click opens the same menu — right-click is not discoverable and
-    // there is nothing else a click on a bowl could sensibly mean.
-    bowlEl.onclick = (e)=>{ e.stopPropagation(); tobbyBowlMenu(e.clientX, e.clientY); };
+
+    // Drag it along the floor. Sideways only: its height is not a free choice,
+    // it is wherever Tobby's feet are, and a bowl you could lift into the air
+    // would stop reading as a bowl on the ground.
+    let bdrag = null;
+    bowlEl.addEventListener('pointerdown', (e)=>{
+      if(e.button && e.button !== 0) return;
+      bdrag = { x:e.clientX, left:parseFloat(bowlEl.style.left) || bowlEl.getBoundingClientRect().x, moved:false };
+      bowlEl.setPointerCapture(e.pointerId);
+    });
+    bowlEl.addEventListener('pointermove', (e)=>{
+      if(!bdrag) return;
+      const dx = e.clientX - bdrag.x;
+      if(Math.abs(dx) > 4) bdrag.moved = true;
+      if(!bdrag.moved) return;
+      bowlEl.dataset.dragging = '1';
+      const w = bowlEl.offsetWidth || 54;
+      TobbyBowl.state().x = Math.max(6, Math.min(innerWidth - w - 6, bdrag.left + dx));
+      tobbyPlaceBowl();
+    });
+    const endDrag = (e)=>{
+      if(!bdrag) return;
+      const moved = bdrag.moved;
+      bdrag = null;
+      delete bowlEl.dataset.dragging;
+      try{ bowlEl.releasePointerCapture(e.pointerId); }catch(_){}
+      if(moved){ persist(); return; }
+      // Not a drag but a tap: the menu. Right-click is not discoverable, and
+      // there is nothing else a tap on a bowl could sensibly mean.
+      tobbyBowlMenu(e.clientX, e.clientY);
+    };
+    bowlEl.addEventListener('pointerup', endDrag);
+    bowlEl.addEventListener('pointercancel', (e)=>{ bdrag = null; delete bowlEl.dataset.dragging; });
   }
 
   // Restore his spot, clamped in case the window got narrower since last time.
@@ -14572,6 +14687,7 @@ function wireTobby(){
   // parked. Cheap: it moves a single rotation, and only while he is awake.
   const trackPointer = (e)=>{
     if(!Tobby3D.ready || tobby().isSleeping) return;
+    if(tbMealFacing) return;           // eating: his head stays in the bowl
     const r = dock.getBoundingClientRect();
     if(Math.abs(e.clientY - r.top) > 320) { Tobby3D.faceForward(); return; }
     Tobby3D.lookAt(e.clientX);
@@ -14579,16 +14695,23 @@ function wireTobby(){
   document.removeEventListener('pointermove', tbTrackPointer);
   tbTrackPointer = trackPointer;
   document.addEventListener('pointermove', tbTrackPointer, { passive:true });
-  dock.addEventListener('mouseleave', ()=>{ if(Tobby3D.ready) Tobby3D.faceForward(); });
+  dock.addEventListener('mouseleave', ()=>{ if(Tobby3D.ready && !tbMealFacing) Tobby3D.faceForward(); });
 
   // Keep the viewport crisp when the window changes, and re-light him when the
   // theme or work group does.
   removeEventListener('resize', tbOnResize);
-  tbOnResize = ()=>{ if(Tobby3D.ready){ Tobby3D.resize(); Tobby3D.render(); } };
+  tbOnResize = ()=>{
+    if(Tobby3D.ready){ Tobby3D.resize(); Tobby3D.render(); }
+    tobbyPlaceBowl();          // the floor moved, so the bowl standing on it does
+  };
   addEventListener('resize', tbOnResize, { passive:true });
   tobbyWatchTheme();
   tobbyStartWander();
-  dock.addEventListener('contextmenu', (e)=>{ e.preventDefault(); tobbyOpenPanel(); });
+  // Right-click him for the same menu the bowl gives: what to serve and what
+  // colour the bowl is. Feeding him by asking HIM is the obvious gesture, and
+  // the bowl can be anywhere on the floor by now. His panel is unaffected — a
+  // plain click still opens it.
+  dock.addEventListener('contextmenu', (e)=>{ e.preventDefault(); tobbyBowlMenu(e.clientX, e.clientY); });
 
   document.addEventListener('click', (e)=>{
     const p = document.getElementById('tobbyPanel');
