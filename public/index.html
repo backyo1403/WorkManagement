@@ -14117,11 +14117,18 @@ const TobbyBowl = {
 
   /** Put the served dish in his bowl.
    *
-   *  The rig ships its own bowl of kibble. Rather than guess where food belongs
-   *  inside it, the dish is fitted to the volume that kibble occupies — the rig
-   *  already knows, and the eating animation is keyed to it. The built-in
-   *  kibble is then hidden, so ordering phở does not get him a bowl of phở
-   *  sitting in a bowl of biscuits. */
+   *  The bowl is the rig's own prop_bowl and the meal is its own
+   *  Tobby_EatFromBowl — both straight out of Tobby_Animated.glb, untouched.
+   *  What the file does NOT contain is a menu: it ships exactly one dish, 36
+   *  kibble meshes across four kibble materials, and nothing else. There is no
+   *  phở in there to use.
+   *
+   *  So kibble is served as the rig authored it — the real modelled biscuits,
+   *  shown rather than imitated — and only the seven dishes the file has no
+   *  geometry for are built here, fitted to the volume that kibble occupies so
+   *  they sit exactly where the animation expects food to be. The rig's kibble
+   *  is hidden for those, or ordering phở would get you phở in a bowl of
+   *  biscuits. */
   serve(kind){
     const prop = this.prop();
     if(!prop) return false;
@@ -14134,6 +14141,16 @@ const TobbyBowl = {
     const mine = this.food;
     const isRigFood = o=> /^food_/.test(o.name);
     const inMine = o=>{ let p=o; while(p){ if(p===mine) return true; p=p.parent; } return false; };
+    const showRigFood = (on)=> prop.traverse(o=>{
+      if(o.isMesh && isRigFood(o) && !inMine(o)) o.visible = on;
+    });
+
+    // The rig's own dish. Nothing to build, nothing to hide.
+    if(kind === 'kibble'){
+      this.makeFood('empty', mine, { r:1, floor:0, top:1 }, T);   // clear ours
+      showRigFood(true);
+      return true;
+    }
 
     let box = this.localBox(prop, o=> isRigFood(o) && !inMine(o), T);
     if(box.isEmpty()) box = this.localBox(prop, o=> !inMine(o), T);   // no rig food to copy
@@ -14149,7 +14166,7 @@ const TobbyBowl = {
       floor: box.min.y,
       top: box.max.y,
     }, T);
-    prop.traverse(o=>{ if(o.isMesh && isRigFood(o) && !inMine(o)) o.visible = false; });
+    showRigFood(false);
     return true;
   },
 
