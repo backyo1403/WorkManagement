@@ -13634,7 +13634,8 @@ function tobbyPanelHtml(){
         // One button, not two sections. Eight dishes and seven swatches laid out
         // in the panel pushed everything else below the fold and made feeding a
         // scroll-then-aim exercise; the choice belongs in a window of its own.
-        return `<button class="tb-q act ${cur&&b.kind!=='empty'?'on':''}" data-tb-feed>🍽️ ${
+        return `<button class="tb-q act ${cur&&b.kind!=='empty'?'on':''}" data-tb-feed>${
+          b.kind !== 'empty' && cur ? cur[1] : '🍽️'} ${
           cur && b.kind !== 'empty'
             ? L('Đang ăn: ','Eating: ') + esc(cur[2])
             : L('Cho ăn','Feed')}</button>`; })()}
@@ -13967,9 +13968,13 @@ function tobbyDrawAvatar(canvas){
 /** Play one named GLB clip directly and hold it, for the cases where the
  *  emotion/pose vocabulary has no word for what he is doing — eating is a clip,
  *  not a mood. Raises the animation priority so idle behaviour cannot cut in. */
-function tobbyPlayClip(clipName, ms){
+function tobbyPlayClip(clipName, ms, look){
   tbAnim.priority = TB_PRIO.ACTIVITY;
   tbAnim.until = performance.now() + (ms || 2000);
+  // The 2D dog cannot play a named clip, so it is told the nearest thing it
+  // does understand. Set directly rather than through tobbyPlay(), which
+  // clears the held clip and would cancel the 3D one on the way past.
+  if(look){ tbAnim.emotion = look[0]; tbAnim.pose = look[1]; }
   // Recorded on tbAnim, not pushed at the body: tobbySync3D re-asserts tbAnim
   // every frame, so a clip set directly on the body lasted one frame before the
   // walk cycle came back and took the meal with it.
@@ -14203,12 +14208,13 @@ function tobbyResumeMeal(){
     tobbyEndMeal();
     return;
   }
-  // Still running, but there is nothing to put the food in until the model is
-  // here. Leave the flag clear and this runs again once it is.
-  if(!TobbyBowl.prop()) return;
+  // Still running. Resumed whether or not the model is here: waiting for it
+  // would leave the bowl stuck mid-meal forever on a browser that never gets
+  // one, which is the same trap as refusing to feed him. `apply()` is a no-op
+  // without the model, and the post-load hook serves the food if it turns up.
   tbMealResumed = true;
   TobbyBowl.apply();
-  tobbyPlayClip('Tobby_EatFromBowl', left);
+  tobbyPlayClip('Tobby_EatFromBowl', left, ['happy','sit']);
   clearTimeout(tbFeedTimer);
   tbFeedTimer = setTimeout(tobbyEndMeal, left);
 }
@@ -14220,15 +14226,12 @@ function tobbyFeed(kind){
   const bowl = TobbyBowl.state();
   if(kind === 'empty'){ tobbyEndMeal({ cancel:true }); return; }
   if(bowl.kind !== 'empty') return;               // already eating — one meal at a time
-  // Refusing in silence is how "I clicked a dish and nothing happened" happens.
-  // The model arrives over the network and may still be on its way, or may
-  // never arrive at all on a connection that cannot reach it.
-  if(!TobbyBowl.prop()){
-    toast(TB_L('Tobby chưa sẵn sàng — thử lại sau vài giây',
-               'Tobby is still arriving — try again in a moment'));
-    return;
-  }
 
+  // Deliberately NOT gated on the 3D model. The bowl is his prop, so without
+  // the model there is nothing to draw — but a meal is state, a timer and some
+  // XP, none of which need WebGL. Refusing here meant that anyone whose
+  // browser cannot reach the CDN, or has no WebGL at all, could never feed him
+  // once: the 2D dog is a supported way to run this app, not a waiting room.
   bowl.kind = kind;
   bowl.fedCount = (bowl.fedCount||0) + 1;
   bowl.lastFedAt = nowISO();
@@ -14242,7 +14245,7 @@ function tobbyFeed(kind){
   if(Tobby3D.ready) Tobby3D.faceForward();
   const dock = document.getElementById('tobbyDock');
   if(dock) dock.dataset.facing = 'right';
-  tobbyPlayClip('Tobby_EatFromBowl', TB_BOWL_EAT_MS);
+  tobbyPlayClip('Tobby_EatFromBowl', TB_BOWL_EAT_MS, ['happy','sit']);
   tobbySay(TB_L('Cảm ơn cậu!','Thanks!'));
 
   clearTimeout(tbFeedTimer);
@@ -14301,14 +14304,15 @@ function tobbyFeedModal(){
           ${L('Đang ăn','Eating')} <b>${esc(cur?cur[2]:'')}</b> · ${
           L('bát tự hết sau 30 giây','the bowl empties after 30 seconds')}
         </div>` : waiting ? `<div class="badge" style="display:block;padding:9px 12px;margin-bottom:14px;">
-          ${L('Đang tải Tobby… thử lại sau vài giây','Loading Tobby… try again in a moment')}
+          ${L('Chưa tải được hình 3D nên không thấy bát — vẫn cho ăn được như thường.',
+              'The 3D model has not loaded, so the bowl will not be visible — feeding still works.')}
         </div>` : ''}
       <div class="modal-section-label" style="margin-top:0;padding-top:0;border-top:none;">${
         L('Món ăn','Dish')}</div>
       <div class="tb-dishes">
         ${TB_BOWL_FOODS.filter(f=>f[0]!=='empty').map(([k,ico,label])=>
           `<button class="tb-dish ${b.kind===k?'on':''}" data-dish="${k}"${
-            eating||waiting?' disabled':''}><span>${ico}</span>${esc(label)}</button>`).join('')}
+            eating?' disabled':''}><span>${ico}</span>${esc(label)}</button>`).join('')}
       </div>
       <div class="modal-section-label">${L('Màu bát','Bowl colour')}</div>
       <div class="tb-bowlcols">
