@@ -13,12 +13,20 @@
 <!-- Tobby's 3D renderer. Declared here because an import map has to exist
      before the first module loads, and GLTFLoader imports the bare specifier
      "three". Nothing is fetched until Tobby actually asks for it — the whole
-     app runs, and stays usable, if these never arrive. -->
+     app runs, and stays usable, if these never arrive.
+
+     Served from this origin rather than unpkg. A CDN is one more network that
+     has to be reachable, and when it is not, Tobby never becomes 3D and there
+     is nothing the app can do about it: an import map has no fallback syntax,
+     so a failed CDN is simply a dead end. These files ship with the app, so if
+     the page loaded at all, they will load too. three@0.160.0, unmodified;
+     the addons keep their original layout because GLTFLoader reaches
+     ../utils/BufferGeometryUtils.js by relative path. -->
 <script type="importmap">
 {
   "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    "three": "/vendor/three/build/three.module.js",
+    "three/addons/": "/vendor/three/addons/"
   }
 }
 </script>
