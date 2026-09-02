@@ -2730,6 +2730,28 @@ body{
   100%{opacity:0; transform:translate(var(--dx), var(--dy)) scale(1.1);}
 }
 :root:not([data-motion="full"]) .tb-spark{display:none;}
+/* Effect flavours. The rig's table names nine of them; these are the shapes
+   they take. All are small, all are brief, none of them is a popup. */
+.tb-spark.big{width:7px; height:7px;}
+.tb-spark.warn{background:var(--danger, #C0483A);}
+.tb-spark.calm{background:var(--text-3);}
+.tb-spark.in{animation:tbSparkIn .7s ease-in forwards;}
+@keyframes tbSparkIn{
+  0%{opacity:0; transform:translate(var(--dx), var(--dy)) scale(1);}
+  25%{opacity:1;}
+  100%{opacity:0; transform:translate(0,0) scale(.4);}
+}
+.tb-zzz{
+  position:fixed; z-index:131; pointer-events:none;
+  font-size:13px; font-weight:800; color:var(--text-3);
+  animation:tbZzz 2.4s ease-out forwards;
+}
+@keyframes tbZzz{
+  0%{opacity:0; transform:translate(0,0) scale(.7);}
+  25%{opacity:.9;}
+  100%{opacity:0; transform:translate(16px,-34px) scale(1.1);}
+}
+:root:not([data-motion="full"]) .tb-zzz{display:none;}
 .tb-sec{font-size:9.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
   color:var(--text-3); margin:16px 0 7px;}
 .tb-sec:first-of-type{margin-top:0;}
@@ -11727,8 +11749,22 @@ const TobbyRig = {
       if(BONE.test(n)) bones[n] = o;
     });
     this.floof = floof;
+    /* The model carries a contract in its own extras: the five stage names,
+       which knobs a stage turns, the wardrobe slots, the Vietnamese item
+       names, and a table of particle events with timings per clip. Reading it
+       means the app follows the rig rather than a second copy of the same
+       facts kept here — and I had been guessing at several of them. */
+    const holder = this.root.getObjectByName('Tobby') || this.root;
+    this.spec = (holder.userData && holder.userData.bachOffice) || null;
     this.wear  = wear;
-    this.slots = Object.fromEntries(Object.entries(slots).map(([k,v])=>[k, [...v].sort()]));
+    // Slots as the rig defines them. Deriving them from the attachment bones
+    // was close but wrong in one telling way: it filed glasses under `head`
+    // with the hats, so wearing a hat took his glasses off. The rig gives
+    // eyes their own slot, which is obviously right.
+    const specSlots = this.spec && this.spec.wardrobe && this.spec.wardrobe.slots;
+    this.slots = specSlots
+      ? Object.fromEntries(Object.entries(specSlots).map(([k,v])=>[k, v.filter(x=> wear[x])]))
+      : Object.fromEntries(Object.entries(slots).map(([k,v])=>[k, [...v].sort()]));
     this.face  = { eye, mouth };
     this.bones = bones;
     this.bowl  = {
@@ -12079,6 +12115,7 @@ const TobbyAnim = {
     const dt = Math.min(0.1, (now - (this.last||now))/1000);
     this.last = now;
     TobbyRig.mixer.update(dt);
+    this.fireClipEvents();
     // AFTER the mixer, every frame. The clips key eyevar/mouthvar scale
     // themselves, so a face set once is overwritten on the next update — which
     // is why the chosen expression silently vanished the moment any clip with
@@ -12092,6 +12129,34 @@ const TobbyAnim = {
       return false;
     });
     TobbyRig.render();
+  },
+
+  /** Fire the rig's own effect table against the clip that is running.
+   *
+   *  Tracked per action so a looping clip fires again each time round, and so
+   *  a clip restarted from the top does not skip its first beat. */
+  _fxSeen:{},
+  fireClipEvents(){
+    const spec = TobbyRig.spec && TobbyRig.spec.events;
+    if(!spec) return;
+    const a = this.actionAction || this.baseAction;
+    const name = this.actionName || this.baseName;
+    if(!a || !name || !spec[name]) return;
+    const dur = a._clip ? a._clip.duration : 0;
+    // Do not wrap a clip that plays once and holds. Tobby_Evolution is exactly
+    // 4.0s long and its last beat is AT 4.0 — the modulo turned that into 0 and
+    // the settle never fired, so the evolution ended on the transformation with
+    // nothing to close it.
+    const loops = dur && !TB_ONCE.has(name);
+    const now = loops ? (a.time % dur) : a.time;
+    const seen = this._fxSeen[name] || (this._fxSeen[name] = { last: -1 });
+    if(now < seen.last) seen.last = -1;              // the clip looped round
+    for(const ev of spec[name]){
+      if(ev.t > seen.last && ev.t <= now){
+        try{ tobbyFx(ev.e); }catch(e){}
+      }
+    }
+    seen.last = now;
   },
 
   start(){
@@ -12392,12 +12457,23 @@ function tobby(){
    coat has filled in — a puppy is mostly head and ears with no floof, and it
    narrows toward the adult's real proportions. `floof` is a fraction rather
    than a flag so the coat thickens gradually instead of appearing in one go. */
+/* Five stages, named by the rig itself: its extras list
+   evolutionStages = [Puppy, Baby, Young, Teen, Adult], in that order, and
+   `rig` below is the name each of ours answers to.
+
+   The rig also says WHICH knobs a stage turns — "uniform rig scale s,
+   leg-chain scale leg (hip bones y-scale), ear bone scale earW/earL, head bone
+   scale head, floof groups on/off" — but leaves the numbers to us. The leg
+   chain is the one that matters most and the one I had been missing: without
+   it a puppy is just a small adult, and the whole point of a stage is that the
+   PROPORTIONS change. Short legs and a big head read as young; the same dog
+   scaled down does not. */
 const TOBBY_STAGES = [
-  { key:'tiny',  vi:'Cún sơ sinh',        en:'Tiny Puppy',  xp:0,    size:0.70, head:1.30, ear:1.18, floof:0    },
-  { key:'puppy', vi:'Cún nhỏ',            en:'Puppy',       xp:150,  size:0.79, head:1.20, ear:1.12, floof:0.15 },
-  { key:'young', vi:'Cún lớn',            en:'Young Tobby', xp:600,  size:0.88, head:1.11, ear:1.07, floof:0.45 },
-  { key:'teen',  vi:'Tobby thiếu niên',   en:'Teen Tobby',  xp:1800, size:0.95, head:1.05, ear:1.03, floof:0.75 },
-  { key:'adult', vi:'Tobby trưởng thành', en:'Adult Tobby', xp:4000, size:1.00, head:1.00, ear:1.00, floof:1 },
+  { key:'tiny',  rig:'Puppy', vi:'Cún sơ sinh',            en:'Tiny Puppy',  xp:0,    size:0.70, leg:0.74, head:1.32, ear:1.20, floof:0    },
+  { key:'baby',  rig:'Baby',  vi:'Cún nhỏ',                en:'Puppy',       xp:150,  size:0.79, leg:0.83, head:1.21, ear:1.13, floof:0.15 },
+  { key:'young', rig:'Young', vi:'Cún lớn',                en:'Young Tobby', xp:600,  size:0.88, leg:0.91, head:1.12, ear:1.07, floof:0.45 },
+  { key:'teen',  rig:'Teen',  vi:'Tobby thiếu niên',       en:'Teen Tobby',  xp:1800, size:0.95, leg:0.97, head:1.05, ear:1.03, floof:0.75 },
+  { key:'adult', rig:'Adult', vi:'Tobby trưởng thành', en:'Adult Tobby', xp:4000, size:1.00, leg:1.00, head:1.00, ear:1.00, floof:1 },
 ];
 const TOBBY_DAY_MS = 86400000;
 const TobbyGrowth = {
@@ -12435,6 +12511,12 @@ const TobbyGrowth = {
     TobbyRig.root.scale.setScalar(s.size);
     const head = TobbyRig.bones.head;   if(head) head.scale.setScalar(s.head);
     ['earL','earR'].forEach(n=>{ const e = TobbyRig.bones[n]; if(e) e.scale.setScalar(s.ear); });
+    // The leg chain, on the vertical axis only: shortening the legs is what
+    // makes a puppy read as a puppy rather than as a shrunken adult.
+    ['thighL','thighR','shinL','shinR'].forEach(n=>{
+      const b = TobbyRig.bones[n];
+      if(b) b.scale.set(1, s.leg, 1);
+    });
     // The extra coat only fills in once he is grown.
     TobbyRig.floof.forEach(g=> g.scale.setScalar(s.floof));
     tobby().stage = s.key;
@@ -12452,9 +12534,11 @@ const TobbyGrowth = {
     // A moment, not a fanfare: he jumps, a few sparks, one line. No modal, no
     // full-screen takeover — the brief is explicit that this must not feel
     // like a mobile game.
+    // The sparks are not placed here: Tobby_Evolution carries its own table
+    // (charge at 0.7s, transformation at 1.5, settle at 4.0) and the
+    // dispatcher fires them on those beats as the clip plays.
     try{
       TobbyBrain.evolve();
-      tobbySparks(7);
       tobbySay(TB_L('Mình lớn rồi nè.','We grew up.'), 4200);
     }catch(e){}
     tobbyRemember('CHARACTER_EVENT', TB_L('Tiến hóa thành ' + s.vi, 'Evolved into ' + s.en), { stage:s.key });
@@ -12651,13 +12735,19 @@ function tobbyWelcomeBack(){
    out of the wear_<item>__<bone> markers. One item per slot, and the spine slot
    owns the sleeves too, because nobody wears sleeves on their own.
    ========================================================= */
+/** The rig names its own clothes. These are the fallback for a model that does
+ *  not, and are overridden by whatever the file says. */
 const TB_WEAR_VI = {
   cap:'Mũ lưỡi trai', hat_brim:'Mũ vành', glasses:'Kính', sunglasses:'Kính râm',
   santa_hat:'Mũ Noel', scarf:'Khăn quàng', blazer:'Áo vest', sweater:'Áo len',
   puffer:'Áo phao', raincoat:'Áo mưa', aodai:'Áo dài', vn_flag:'Áo cờ Việt Nam',
   flower_shirt:'Áo hoa', santa_suit:'Bộ đồ Noel',
 };
-const TB_SLOT_VI = { head:'Đầu', neck:'Cổ', spine:'Thân' };
+function tbWearName(item){
+  const spec = TobbyRig.spec && TobbyRig.spec.wardrobe && TobbyRig.spec.wardrobe.items;
+  return (spec && spec[item]) || TB_WEAR_VI[item] || item;
+}
+const TB_SLOT_VI = { head:'Đầu', eyes:'Mắt', neck:'Cổ', body:'Thân', spine:'Thân' };
 /** Earned by staying, not by grinding. */
 const TB_UNLOCK_DAY = {
   scarf:0, cap:3, glasses:10, sweater:25, hat_brim:45, sunglasses:70,
@@ -13163,7 +13253,7 @@ function tobbyPanel(){
           '<i>\ud83c\udf7d\ufe0f</i>' +
           '<span><b>' + L2('Cho \u0103n, m\u00e0u b\u00e1t, qu\u1ea7n \u00e1o','Feed, bowl colour, clothes') + '</b>' +
           '<small>' + (eating ? L2('\u0111ang \u0103n ' + (cur?cur[2]:''), 'eating')
-                     : lent ? L2('\u0111ang m\u01b0\u1ee3n ' + (TB_WEAR_VI[lent]||lent), 'wearing ' + lent)
+                     : lent ? L2('\u0111ang m\u01b0\u1ee3n ' + tbWearName(lent), 'wearing ' + lent)
                      : L2('b\u00e1t \u0111ang tr\u1ed1ng', 'bowl empty')) + '</small></span>' +
           '<em>\u203a</em>' +
         '</button>';
@@ -13233,13 +13323,13 @@ function tobbyCarePanel(){
     // neck AND spine — so listing the slots verbatim showed it three times.
     // Each item is filed once, under the most body-covering slot it uses,
     // which is also the one a person would look for it in.
-    const PRIMARY = ['spine','neck','head'];
+    const PRIMARY = ['body','spine','neck','eyes','head'];
     const filed = {};
     Object.keys(TobbyRig.wear).forEach(item=>{
       const slot = PRIMARY.find(s=> (TobbyRig.slots[s]||[]).includes(item));
       if(slot) (filed[slot] = filed[slot] || []).push(item);
     });
-    const slotRows = ['head','neck','spine']
+    const slotRows = ['head','eyes','neck','body','spine']
       .filter(s=> filed[s] && filed[s].length)
       .map(s=> [s, filed[s].sort()])
       .map(([slot, items])=>
@@ -13251,7 +13341,7 @@ function tobbyCarePanel(){
         return '<button class="tb-pick ' + (worn.has(it)?'on':'') + '" data-wear="' + it + '"' +
           (own ? '' : ' disabled') + '>' +
           '<i>' + (isLent ? '\u2601\ufe0f' : own ? '\u2713' : '\ud83d\udd12') + '</i>' +
-          esc(TB_WEAR_VI[it] || it) +
+          esc(tbWearName(it)) +
           (own ? (isLent ? '<small>' + L2('th\u1eddi ti\u1ebft','weather') + '</small>' : '')
                : '<small>' + L2('ng\u00e0y ' + day, 'day ' + day) + '</small>') +
           '</button>';
@@ -13295,8 +13385,8 @@ function tobbyCarePanel(){
         slotRows +
         (lent ? '<div class="tb-borrowed">' + L2(
             'Tr\u1eddi ' + (WEATHER.kind==='rain'||WEATHER.kind==='storm' ? 'm\u01b0a' : WEATHER.kind==='snow' ? 'tuy\u1ebft' : 'th\u1ea5t th\u01b0\u1eddng') +
-            ' \u2014 Tobby \u0111ang m\u01b0\u1ee3n ' + (TB_WEAR_VI[lent]||lent) + '. Tr\u1ea3 l\u1ea1i khi tr\u1eddi \u0111\u1eb9p.',
-            'Weather gear on loan: ' + (TB_WEAR_VI[lent]||lent) + '.') + '</div>' : '');
+            ' \u2014 Tobby \u0111ang m\u01b0\u1ee3n ' + tbWearName(lent) + '. Tr\u1ea3 l\u1ea1i khi tr\u1eddi \u0111\u1eb9p.',
+            'Weather gear on loan: ' + tbWearName(lent) + '.') + '</div>' : '');
     wire();
     pop.place();
   }
@@ -13343,24 +13433,73 @@ function tobbySay(text, ms){
 }
 /** Six sparks off the top of him. Deliberately small: the brief asks for a
  *  moment, not a mobile-game popup. */
-function tobbySparks(n){
+function tobbySparks(n, opt){
   if(tbReduceMotion()) return;
   const dock = document.getElementById('tobbyDock');
   if(!dock) return;
+  const o = opt || {};
   const d = dock.getBoundingClientRect();
-  const cx = d.left + d.width/2, cy = d.top + d.height*0.35;
+  const cx = d.left + d.width/2;
+  const cy = d.top + d.height * (o.low ? 0.86 : 0.35);
+  const spread = o.spread || 40;
   for(let i = 0; i < (n||6); i++){
     const s = document.createElement('div');
-    s.className = 'tb-spark';
-    const a = (-0.5 - Math.random()) * Math.PI, r = 26 + Math.random()*30;
+    s.className = 'tb-spark' + (o.cls ? ' ' + o.cls : '') + (o.inward ? ' in' : '');
+    // Dust settles sideways along the floor; everything else lifts.
+    const a = o.low ? (Math.random() - 0.5) * Math.PI * 0.7
+                    : (-0.5 - Math.random()) * Math.PI;
+    const r = spread * (0.6 + Math.random()*0.6);
     s.style.setProperty('--dx', Math.cos(a)*r + 'px');
-    s.style.setProperty('--dy', Math.sin(a)*r + 'px');
+    s.style.setProperty('--dy', (o.low ? Math.abs(Math.sin(a))*r*0.3 : Math.sin(a)*r) + 'px');
     s.style.left = (cx - 2 + (Math.random()-0.5)*18) + 'px';
     s.style.top  = (cy - 2) + 'px';
-    s.style.animationDelay = (i*40) + 'ms';
+    s.style.animationDelay = (i*35) + 'ms';
     document.body.appendChild(s);
-    setTimeout(()=> s.remove(), 1100 + i*40);
+    setTimeout(()=> s.remove(), 1200 + i*35);
   }
+}
+/* =========================================================
+   Effects, as the rig specifies them
+   ---------------------------------------------------------
+   The model ships a table of events keyed by clip — which effect, and at
+   what time within the clip. Reading it means the sparks land on the beat the
+   animator intended (the charge at 0.7s of an evolution, the transformation at
+   1.5, the settle at 4.0) instead of all at once when the clip is triggered.
+   ========================================================= */
+const TB_FX = {
+  SMALL_PIXEL_SPARKS:   { n:4,  spread:26, cls:'' },
+  PIXEL_BURST:          { n:10, spread:44, cls:'big' },
+  PIXEL_DUST:           { n:6,  spread:22, cls:'calm', low:true },
+  PIXEL_CHARGE:         { n:9,  spread:40, cls:'', inward:true },
+  PIXEL_EXPLOSION:      { n:14, spread:60, cls:'big' },
+  PIXEL_TRANSFORMATION: { n:16, spread:58, cls:'big' },
+  PIXEL_SETTLE:         { n:5,  spread:20, cls:'calm' },
+  PIXEL_ALERT:          { n:6,  spread:30, cls:'warn' },
+  PIXEL_PING:           { n:2,  spread:18, cls:'' },
+  PIXEL_ZZZ:            { zzz:true },
+  PIXEL_ZZZ_LOOP:       { zzz:true, every:2600 },
+  // The three screen/thought loops are ambient states rather than moments;
+  // they belong to the clip itself and need nothing drawn over the top.
+  PIXEL_THOUGHT_LOOP:   null,
+  PIXEL_SCREEN_LOOP:    null,
+};
+function tobbyFx(kind){
+  const f = TB_FX[kind];
+  if(!f || tbReduceMotion()) return;
+  if(f.zzz) return tobbyZzz();
+  tobbySparks(f.n, f);
+}
+function tobbyZzz(){
+  const dock = document.getElementById('tobbyDock');
+  if(!dock) return;
+  const d = dock.getBoundingClientRect();
+  const el = document.createElement('div');
+  el.className = 'tb-zzz';
+  el.textContent = 'z';
+  el.style.left = (d.left + d.width*0.62) + 'px';
+  el.style.top  = (d.top + d.height*0.28) + 'px';
+  document.body.appendChild(el);
+  setTimeout(()=> el.remove(), 2500);
 }
 /** Put him in the DOM and keep him there.
  *
