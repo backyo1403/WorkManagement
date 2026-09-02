@@ -2698,6 +2698,38 @@ body{
   font-size:17px; line-height:1; padding:2px 4px; border-radius:7px;
 }
 .tb-pop-head button:hover{background:var(--surface-2); color:var(--text);}
+
+/* A small bubble over his head. Short-lived and never modal: he is commenting,
+   not interrupting. */
+.tb-speech{
+  position:fixed; z-index:131; max-width:210px; pointer-events:none;
+  background:var(--surface); color:var(--text); border:1px solid var(--border);
+  border-radius:13px; padding:7px 11px; font-size:12px; line-height:1.45;
+  box-shadow:var(--shadow-lg);
+  animation:tbSay .22s cubic-bezier(.34,1.3,.64,1) both;
+}
+.tb-speech::after{
+  content:''; position:absolute; left:50%; bottom:-5px; width:9px; height:9px;
+  transform:translateX(-50%) rotate(45deg);
+  background:var(--surface); border-right:1px solid var(--border); border-bottom:1px solid var(--border);
+}
+.tb-speech.out{animation:tbSayOut .18s ease forwards;}
+@keyframes tbSay{from{opacity:0; transform:translateY(5px) scale(.95);} to{opacity:1; transform:none;}}
+@keyframes tbSayOut{to{opacity:0; transform:translateY(-4px);}}
+:root:not([data-motion="full"]) .tb-speech{animation:none;}
+/* Evolution sparks. Six small squares, in his own pixel idiom, gone in a
+   second — a moment, not a fanfare. */
+.tb-spark{
+  position:fixed; z-index:131; width:5px; height:5px; border-radius:1px;
+  pointer-events:none; background:var(--brand);
+  animation:tbSpark .9s cubic-bezier(.2,.7,.3,1) forwards;
+}
+@keyframes tbSpark{
+  0%{opacity:0; transform:translate(0,0) scale(.6);}
+  20%{opacity:1;}
+  100%{opacity:0; transform:translate(var(--dx), var(--dy)) scale(1.1);}
+}
+:root:not([data-motion="full"]) .tb-spark{display:none;}
 .tb-sec{font-size:9.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
   color:var(--text-3); margin:16px 0 7px;}
 .tb-sec:first-of-type{margin-top:0;}
@@ -2791,7 +2823,11 @@ body{
   position:fixed; bottom:26px; left:0; z-index:130;
   width:76px; height:88px; pointer-events:none;
   display:flex; align-items:flex-end; justify-content:center;
-  transition:left .18s cubic-bezier(.22,.61,.36,1);
+  /* No transition on `left` here. render() rebuilds the shell on every page
+     change, so the dock is a new element starting at left:0 and only then put
+     back in its corner — with a transition on the property, that replacement
+     played as him sliding across the whole window on every navigation. Walking
+     sets its own transition for the duration of the walk and clears it. */
 }
 .tobby-dock[data-dragging="1"]{ transition:none; }
 /* The button is the whole dock. It used to be 72x72 holding a 76x88 stage,
@@ -4908,6 +4944,9 @@ function updateTask(id, patch, activityText){
   t.completion = computeCompletion(t);
   if(activityText) logActivity(t, activityText);
   persist();
+  // A project is finished when its last task is — noticed here rather than
+  // announced, so it fires once and only when it is actually true.
+  try{ const _t = STATE.tasks.find(x=>x.id===id); if(_t) tobbyCheckProject(_t.projectId); }catch(e){}
 }
 function deleteTaskById(id){ STATE.tasks = STATE.tasks.filter(x=>x.id!==id); persist(); }
 /** Checkbox with an SVG tick so it can be drawn in on completion. */
@@ -4945,7 +4984,7 @@ function toggleTaskDone(id, srcEl){
 
   if(activeTimer && activeTimer.taskId===id) stopTimer();
   registerCombo();
-  try{ TobbyBrain.taskDone(); }catch(e){}
+  try{ tobbyOnTaskDone(STATE.tasks.find(x=>x.id===id)); }catch(e){}
   // Let the tick draw + burst play, then re-render so counters and bars animate.
   if(srcEl){
     srcEl.classList.add('done','just-done');
@@ -5945,7 +5984,7 @@ function stopTimer(){
     t.actualHours = +((( t.actualHours||0) + minutes/60).toFixed(2)); t.updatedAt=nowISO(); persist(); }
   toast(`Đã ghi nhận ${minutes} phút`);
   activeTimer = null;
-  try{ TobbyBrain.beProud(); }catch(e){}
+  try{ tobbyOnFocus(minutes); TobbyBrain.beProud(); }catch(e){}
   renderView();
 }
 function weekTimeLogged(){
@@ -12228,7 +12267,8 @@ const TobbyBrain = {
   },
   yawn(){    this.feel('yawning', 1400); TobbyAnim.playAction('Tobby_Yawn'); },
   stretch(){ TobbyAnim.playAction('Tobby_Stretch'); },
-  play(){    this.feel('excited', 1400); TobbyAnim.playAction('Tobby_Play'); },
+  play(){    this.feel('excited', 1400); TobbyAnim.playAction('Tobby_Play');
+             try{ tobbyBond(TB_BOND.PLAY, 'play'); }catch(e){} },
 
   /* ---------- PRODUCTIVITY ---------- */
   /** The desk is not managed here on purpose: prop_workstation is scale-keyed
@@ -12312,9 +12352,16 @@ const TobbyBrain = {
    --------------------------------------------------------- */
 function tobbyDefaults(){
   return {
-    x:null, xp:0, firstMetAt:nowISO(), ageDays:0, lastTick:Date.now(),
-    stage:'puppy', worn:[], unlocked:['scarf'],
+    x:null, firstMetAt:nowISO(), ageDays:0, lastTick:Date.now(),
+    stage:'tiny', worn:[], unlocked:['scarf'],
     bowl:{ kind:'empty', color:null, fedCount:0, lastFedAt:null },
+    /* Growth is earned, not clocked. `xp` comes from finished work; `bond`
+       from the relationship; `ageDays` is kept only so he can say how long he
+       has known you, never to decide how grown he is. */
+    xp:0, bond:0, bondLevel:1,
+    stats:{ tasks:0, important:0, projects:0, goals:0, focusMinutes:0, reviews:0, days:0 },
+    streak:{ days:0, lastDay:null },
+    memories:[], milestones:[], lastSeenAt:nowISO(),
   };
 }
 function tobby(){
@@ -12322,6 +12369,10 @@ function tobby(){
   const d = tobbyDefaults();
   Object.keys(d).forEach(k=>{ if(STATE.tobby[k] === undefined) STATE.tobby[k] = d[k]; });
   if(!STATE.tobby.bowl) STATE.tobby.bowl = d.bowl;
+  if(!STATE.tobby.stats) STATE.tobby.stats = d.stats;
+  if(!STATE.tobby.streak) STATE.tobby.streak = d.streak;
+  if(!Array.isArray(STATE.tobby.memories)) STATE.tobby.memories = [];
+  if(!Array.isArray(STATE.tobby.milestones)) STATE.tobby.milestones = [];
   return STATE.tobby;
 }
 
@@ -12336,11 +12387,17 @@ function tobby(){
    Age is wall-clock. Thirty days away is thirty days older; no amount of
    finished work brings it forward, which is the whole point of a timeline.
    ========================================================= */
+/* Five stages. The rig ships no per-stage meshes and does not key ROOT's
+   scale, so a stage is a set of proportions on real bones plus how much of the
+   coat has filled in — a puppy is mostly head and ears with no floof, and it
+   narrows toward the adult's real proportions. `floof` is a fraction rather
+   than a flag so the coat thickens gradually instead of appearing in one go. */
 const TOBBY_STAGES = [
-  { key:'puppy', vi:'Cún nhỏ',       en:'Puppy', days:0,   size:0.80, head:1.20, ear:1.12, floof:false },
-  { key:'young', vi:'Cún lớn',       en:'Young', days:30,  size:0.90, head:1.09, ear:1.06, floof:false },
-  { key:'adult', vi:'Trưởng thành', en:'Grown', days:120, size:1.00, head:1.00, ear:1.00, floof:true  },
-  { key:'elder', vi:'Lão làng',      en:'Elder', days:365, size:1.03, head:0.95, ear:0.97, floof:true  },
+  { key:'tiny',  vi:'Cún sơ sinh',        en:'Tiny Puppy',  xp:0,    size:0.70, head:1.30, ear:1.18, floof:0    },
+  { key:'puppy', vi:'Cún nhỏ',            en:'Puppy',       xp:150,  size:0.79, head:1.20, ear:1.12, floof:0.15 },
+  { key:'young', vi:'Cún lớn',            en:'Young Tobby', xp:600,  size:0.88, head:1.11, ear:1.07, floof:0.45 },
+  { key:'teen',  vi:'Tobby thiếu niên',   en:'Teen Tobby',  xp:1800, size:0.95, head:1.05, ear:1.03, floof:0.75 },
+  { key:'adult', vi:'Tobby trưởng thành', en:'Adult Tobby', xp:4000, size:1.00, head:1.00, ear:1.00, floof:1 },
 ];
 const TOBBY_DAY_MS = 86400000;
 const TobbyGrowth = {
@@ -12353,19 +12410,23 @@ const TobbyGrowth = {
     return T.ageDays || 0;
   },
   ageDays(){ return tobby().ageDays || 0; },
-  stageFor(days){
+  xp(){ return tobby().xp || 0; },
+  /** Which stage a given amount of finished work earns. Deliberately NOT a
+   *  function of days: time passing is not achievement, and a character who
+   *  grows up while you ignore him is measuring the wrong thing. */
+  stageFor(xp){
     let s = TOBBY_STAGES[0];
-    for(const x of TOBBY_STAGES) if(days >= x.days) s = x;
+    for(const x of TOBBY_STAGES) if(xp >= x.xp) s = x;
     return s;
   },
-  current(){ return this.stageFor(this.ageDays()); },
-  next(){ return TOBBY_STAGES.find(s=> s.days > this.ageDays()) || null; },
+  current(){ return this.stageFor(this.xp()); },
+  next(){ return TOBBY_STAGES.find(s=> s.xp > this.xp()) || null; },
   progress(){
     const cur = this.current(), nx = this.next();
-    if(!nx) return { pct:1, cur, next:null, daysLeft:0 };
-    const span = nx.days - cur.days;
-    return { pct: Math.min(1, (this.ageDays()-cur.days)/span), cur, next:nx,
-             daysLeft: Math.max(0, nx.days - this.ageDays()) };
+    if(!nx) return { pct:1, cur, next:null, xpLeft:0 };
+    const span = nx.xp - cur.xp;
+    return { pct: Math.min(1, (this.xp()-cur.xp)/span), cur, next:nx,
+             xpLeft: Math.max(0, nx.xp - this.xp()) };
   },
   /** Put the proportions on the bones. */
   apply(){
@@ -12375,7 +12436,7 @@ const TobbyGrowth = {
     const head = TobbyRig.bones.head;   if(head) head.scale.setScalar(s.head);
     ['earL','earR'].forEach(n=>{ const e = TobbyRig.bones[n]; if(e) e.scale.setScalar(s.ear); });
     // The extra coat only fills in once he is grown.
-    TobbyRig.floof.forEach(g=> g.scale.setScalar(s.floof ? 1 : 0));
+    TobbyRig.floof.forEach(g=> g.scale.setScalar(s.floof));
     tobby().stage = s.key;
     TobbyRig.frame();          // he is a different size now; re-aim at him
     return true;
@@ -12387,13 +12448,202 @@ const TobbyGrowth = {
     if(T.stage === want){ this.apply(); return null; }
     T.stage = want; persist();
     this.apply();
-    try{ TobbyBrain.evolve(); }catch(e){}
     const s = this.current();
-    try{ toast(TB_L('Tobby đã lớn: ' + s.vi, 'Tobby grew up: ' + s.en)); }catch(e){}
+    // A moment, not a fanfare: he jumps, a few sparks, one line. No modal, no
+    // full-screen takeover — the brief is explicit that this must not feel
+    // like a mobile game.
+    try{
+      TobbyBrain.evolve();
+      tobbySparks(7);
+      tobbySay(TB_L('Mình lớn rồi nè.','We grew up.'), 4200);
+    }catch(e){}
+    tobbyRemember('CHARACTER_EVENT', TB_L('Tiến hóa thành ' + s.vi, 'Evolved into ' + s.en), { stage:s.key });
+    tobbyBond(TB_BOND.MILESTONE, 'evolution');
     return s;
   },
 };
 
+/* =========================================================
+   XP — what finished work is worth
+   ---------------------------------------------------------
+   Only real progress counts. Opening the app is worth nothing, clicking about
+   is worth nothing, and there is no reward for volume of activity: a character
+   that grows when you fidget is measuring the wrong thing and teaches the wrong
+   habit. Looking after him earns the RELATIONSHIP instead, which is a separate
+   axis on purpose.
+   ========================================================= */
+const TB_XP = {
+  TASK:            10,
+  TASK_IMPORTANT:  20,      // ASAP or Cao
+  PROJECT:        100,
+  GOAL:           150,      // no goals feature yet; the hook is here for one
+  REVIEW_WEEK:     30,
+  DAY_ACTIVE:       5,      // one finished thing today, once a day
+  FOCUS_PER_10MIN:  4,
+  FOCUS_CAP:       40,      // per session, so a forgotten timer is not a jackpot
+};
+
+/* Relationship. Grows through being around him and through finishing things
+   together — never through opening the app, and never on a schedule. */
+const TOBBY_BONDS = [
+  { lv:1, at:0,   vi:'Người lạ',        en:'Stranger' },
+  { lv:2, at:40,  vi:'Người quen',       en:'Acquaintance' },
+  { lv:3, at:140, vi:'Bạn đồng hành',  en:'Companion' },
+  { lv:4, at:360, vi:'Cộng sự tin cậy', en:'Trusted Partner' },
+  { lv:5, at:800, vi:'Bạn thân',          en:'Best Friend' },
+];
+const TB_BOND = {
+  FEED:       3,   PLAY:      2,   ASK:        1,
+  TASK:       1,   PROJECT:  15,   REVIEW:     5,
+  STREAK_DAY: 4,   MILESTONE:10,   FOCUS_HOUR: 6,
+  RETURN:     8,   // came back after a while away
+};
+
+/* Memory. Structured, capped, and deliberately thin: a title, a type, a date
+   and a few numbers. Never raw user content, never anything private — he
+   remembers THAT you finished the Amsterdam project, not what was in it. */
+const TB_MEM_TYPES = ['MILESTONE','PROJECT','GOAL','STREAK','ACHIEVEMENT','INTERACTION','CHARACTER_EVENT'];
+const TB_MEM_MAX = 60;
+function tobbyRemember(type, title, metadata){
+  if(!TB_MEM_TYPES.includes(type)) return null;
+  const T = tobby();
+  const m = { type, title: String(title||'').slice(0,120), date: nowISO(),
+              metadata: metadata && typeof metadata === 'object' ? metadata : {} };
+  T.memories.unshift(m);
+  // Interactions are the chatty ones; they are trimmed first so a milestone is
+  // never pushed out by a fortnight of feeding him.
+  if(T.memories.length > TB_MEM_MAX){
+    const keep = T.memories.filter(x=> x.type !== 'INTERACTION');
+    const chat = T.memories.filter(x=> x.type === 'INTERACTION');
+    T.memories = keep.concat(chat).slice(0, TB_MEM_MAX);
+  }
+  persist();
+  return m;
+}
+function tobbyMemories(type){
+  const all = tobby().memories || [];
+  return type ? all.filter(m=> m.type === type) : all;
+}
+
+/** Bond points. Separate from XP because looking after him is not work, and
+ *  work is not affection — conflating them makes both meaningless. */
+function tobbyBond(amount, why){
+  const T = tobby();
+  if(!amount) return null;
+  T.bond = Math.max(0, (T.bond||0) + amount);
+  const lv = TOBBY_BONDS.filter(b=> T.bond >= b.at).pop() || TOBBY_BONDS[0];
+  const rose = lv.lv !== (T.bondLevel||1);
+  T.bondLevel = lv.lv;
+  persist();
+  if(rose){
+    tobbyRemember('CHARACTER_EVENT', TB_L('Trở thành ' + lv.vi, 'Became your ' + lv.en), { level: lv.lv });
+    try{ TobbyBrain.levelUp(); tobbySay(TB_L('Mình quý cậu hơn rồi.','We are closer now.')); }catch(e){}
+  }
+  return { level: lv, rose };
+}
+function tobbyBondLevel(){
+  const T = tobby();
+  return TOBBY_BONDS.find(b=> b.lv === (T.bondLevel||1)) || TOBBY_BONDS[0];
+}
+
+/** Award XP for something that was actually finished, and evolve if it is
+ *  enough. Returns what happened so a caller can react. */
+function tobbyGainXP(amount, why, meta){
+  const T = tobby();
+  if(!amount || amount <= 0) return null;
+  const before = TobbyGrowth.current().key;
+  T.xp = (T.xp||0) + amount;
+  persist();
+  const after = TobbyGrowth.current().key;
+  if(after !== before){ TobbyGrowth.check(); return { xp:T.xp, evolved:true, stage:after }; }
+  return { xp:T.xp, evolved:false, stage:after };
+}
+
+/* ---------- the things that count ---------- */
+/** One finished task. Important ones are worth double — the app already knows
+ *  which those are, so this does not need its own idea of importance. */
+function tobbyOnTaskDone(task){
+  const T = tobby();
+  const important = task && /ASAP|Cao/i.test(task.priority || '');
+  T.stats.tasks++; if(important) T.stats.important++;
+  tobbyGainXP(important ? TB_XP.TASK_IMPORTANT : TB_XP.TASK, 'task');
+  tobbyBond(TB_BOND.TASK, 'task');
+  tobbyTouchDay();
+  try{ TobbyBrain.taskDone(); }catch(e){}
+}
+/** A project whose tasks are all done. Checked rather than announced, so it
+ *  fires once and only when it is actually true. */
+function tobbyCheckProject(projectId){
+  if(!projectId) return;
+  const T = tobby();
+  if((T.milestones||[]).some(m=> m.key === 'project:'+projectId)) return;
+  const tasks = STATE.tasks.filter(x=> x.projectId === projectId && !x.archived);
+  if(!tasks.length || !tasks.every(x=> x.status === 'Hoàn thành')) return;
+  const p = STATE.projects.find(x=> x.id === projectId);
+  T.milestones.push({ key:'project:'+projectId, at: nowISO() });
+  T.stats.projects++;
+  persist();
+  tobbyGainXP(TB_XP.PROJECT, 'project');
+  tobbyBond(TB_BOND.PROJECT, 'project');
+  tobbyRemember('PROJECT', TB_L('Hoàn thành dự án ' + (p?p.name:''), 'Finished project ' + (p?p.name:'')),
+                { projectId, tasks: tasks.length });
+  try{ TobbyBrain.celebrate(); tobbySay(TB_L('Xong cả dự án rồi!','A whole project done!')); }catch(e){}
+}
+/** Focus, paid by the time actually spent. Capped, so a timer left running
+ *  overnight is not worth more than a good afternoon. */
+function tobbyOnFocus(minutes){
+  const T = tobby();
+  if(!minutes || minutes < 5) return;                 // a few seconds is not focus
+  T.stats.focusMinutes += minutes;
+  const xp = Math.min(TB_XP.FOCUS_CAP, Math.floor(minutes/10) * TB_XP.FOCUS_PER_10MIN);
+  if(xp > 0) tobbyGainXP(xp, 'focus');
+  if(minutes >= 60) tobbyBond(TB_BOND.FOCUS_HOUR, 'focus');
+  tobbyTouchDay();
+}
+/** A week actually reviewed — once per week, not once per glance. */
+function tobbyOnReview(range){
+  if(range !== 'week') return;
+  const T = tobby();
+  const wk = new Date(); const key = 'review:' + wk.getFullYear() + ':' + Math.floor(dayOfYear(wk)/7);
+  if((T.milestones||[]).some(m=> m.key === key)) return;
+  T.milestones.push({ key, at: nowISO() });
+  T.stats.reviews++;
+  persist();
+  tobbyGainXP(TB_XP.REVIEW_WEEK, 'review');
+  tobbyBond(TB_BOND.REVIEW, 'review');
+}
+function dayOfYear(d){ return Math.floor((d - new Date(d.getFullYear(),0,0)) / 86400000); }
+/** A day counts only if something was finished in it. Merely opening the app
+ *  is not a day of work and does not move him an inch. */
+function tobbyTouchDay(){
+  const T = tobby();
+  const today = new Date().toDateString();
+  if(T.streak.lastDay === today) return;
+  const yesterday = new Date(Date.now()-86400000).toDateString();
+  T.streak.days = (T.streak.lastDay === yesterday) ? (T.streak.days||0)+1 : 1;
+  T.streak.lastDay = today;
+  T.stats.days++;
+  persist();
+  tobbyGainXP(TB_XP.DAY_ACTIVE, 'day');
+  tobbyBond(TB_BOND.STREAK_DAY, 'streak');
+  if(T.streak.days === 7 || T.streak.days === 30 || T.streak.days === 100){
+    tobbyRemember('STREAK', TB_L(T.streak.days + ' ngày liên tiếp', T.streak.days + ' days in a row'), { days:T.streak.days });
+    tobbyBond(TB_BOND.MILESTONE, 'streak');
+  }
+}
+/** Coming back after a while away is worth something — to him, not to the
+ *  work. Checked once per load. */
+function tobbyWelcomeBack(){
+  const T = tobby();
+  const last = Date.parse(T.lastSeenAt || '') || 0;
+  const away = last ? (Date.now() - last) / 86400000 : 0;
+  T.lastSeenAt = nowISO(); persist();
+  if(away >= 3){
+    tobbyBond(TB_BOND.RETURN, 'return');
+    tobbyRemember('INTERACTION', TB_L('Quay lại sau ' + Math.round(away) + ' ngày', 'Back after ' + Math.round(away) + ' days'), { away: Math.round(away) });
+    try{ TobbyBrain.feel('excited', 2600); tobbySay(TB_L('Cậu quay lại rồi!','You came back!')); }catch(e){}
+  }
+}
 /* =========================================================
    THE WARDROBE
    ---------------------------------------------------------
@@ -12651,8 +12901,13 @@ function tobbyEndMeal(opts){
   persist();
   TobbyBowl.apply();
   if(!wasFed) return;
-  // Taking the food away is not a meal — he is paid for one he finished.
-  if(!(opts && opts.cancel)){ tobby().xp = (tobby().xp||0) + TB_BOWL_XP; persist(); }
+  // Taking the food away is not a meal. And a finished one pays the
+  // RELATIONSHIP, not XP: feeding him is care, not work, and letting care
+  // grow him up would make the growth meaningless.
+  if(!(opts && opts.cancel)){
+    tobbyBond(TB_BOND.FEED, 'feed');
+    tobbyRemember('INTERACTION', TB_L('Được cho ăn', 'Was fed'), {});
+  }
   if(TobbyAnim.actionName === 'Tobby_EatFromBowl') TobbyAnim.endAction();
   TobbyBrain.relax();
 }
@@ -12817,11 +13072,12 @@ function tobbyAnswer(key){
       const g = TobbyGrowth.progress();
       const T = tobby();
       return { text: L2(
-        'Ngày thứ ' + TobbyGrowth.ageDays() + ', đang là ' + g.cur.vi + '. ' +
-          (g.next ? 'Còn ' + g.daysLeft + ' ngày nữa lên ' + g.next.vi + '.' : 'Đã trưởng thành.') +
-          ' Đã ăn ' + (T.bowl.fedCount||0) + ' bữa.',
-        'Day ' + TobbyGrowth.ageDays() + ', ' + g.cur.en + '. ' +
-          (g.next ? g.daysLeft + ' days to ' + g.next.en + '.' : 'Fully grown.')) };
+        'Mình đang là ' + g.cur.vi + ', ' + (T.xp||0) + ' XP. ' +
+          (g.next ? 'Còn ' + g.xpLeft + ' XP nữa lên ' + g.next.vi + '.' : 'Đã trưởng thành rồi.') +
+          ' Chúng ta là ' + tobbyBondLevel().vi.toLowerCase() + ', quen nhau ' + TobbyGrowth.ageDays() + ' ngày.',
+        'I am a ' + g.cur.en + ' on ' + (T.xp||0) + ' XP. ' +
+          (g.next ? g.xpLeft + ' XP to ' + g.next.en + '.' : 'Fully grown.') +
+          ' We are ' + tobbyBondLevel().en.toLowerCase() + ', ' + TobbyGrowth.ageDays() + ' days now.') };
     }
   }
   return { text: L2('Mình chưa hiểu ý bạn.','I did not follow that.') };
@@ -12868,12 +13124,14 @@ function tobbyPanel(){
         '<div class="tb-age">' +
           '<b>' + esc(LANG==='en' ? g.cur.en : g.cur.vi) + '</b>' +
           '<span class="bar"><i style="width:' + Math.round(g.pct*100) + '%"></i></span>' +
-          '<span>' + (g.next ? L2(g.daysLeft + ' ng\u00e0y n\u1eefa', g.daysLeft + ' days')
+          '<span>' + (g.next ? L2(g.xpLeft + ' XP n\u1eefa', g.xpLeft + ' XP to go')
                              : L2('\u0111\u00e3 tr\u01b0\u1edfng th\u00e0nh','fully grown')) + '</span>' +
         '</div>' +
         '<div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">' +
-          L2('Ng\u00e0y ' + TobbyGrowth.ageDays(), 'Day ' + TobbyGrowth.ageDays()) +
-          ' \u00b7 ' + (T.xp||0) + ' XP</div>' +
+          (T.xp||0) + ' XP \u00b7 ' +
+          esc(LANG==='en' ? tobbyBondLevel().en : tobbyBondLevel().vi) +
+          ' \u00b7 ' + L2('quen nhau ' + TobbyGrowth.ageDays() + ' ng\u00e0y',
+                          'known you ' + TobbyGrowth.ageDays() + ' days') + '</div>' +
 
         (answer ? '<div class="tb-answer">' + esc(answer.text).replace(/\n/g,'<br>') +
           (answer.task ? '<div class="tb-answer-acts">' +
@@ -12936,7 +13194,7 @@ function tobbyPanel(){
       if(k==='task'){ openTaskModal(null); }
       if(k==='note'){ const n = addNote({ title:'', content:'' }); render(); if(typeof openNote==='function' && n) openNote(n.id); }
       if(k==='focus'){ const t = tobbyPickNext(); if(t) toggleTimer(t.id); else toast(TB_L('Kh\u00f4ng c\u00f3 vi\u1ec7c n\u00e0o \u0111\u1ec3 t\u1eadp trung.','Nothing to focus on.')); }
-      if(k==='review'){ VIEW='dashboard'; render(); }
+      if(k==='review'){ VIEW='dashboard'; standupRange='week'; try{ tobbyOnReview('week'); }catch(e){} render(); }
       if(k==='calendar'){ VIEW='calendar'; render(); }
       if(k==='notif'){ VIEW='notifications'; render(); }
     });
@@ -13004,13 +13262,13 @@ function tobbyCarePanel(){
           '<b>' + esc(LANG==='en' ? g.cur.en : g.cur.vi) + '</b>' +
           '<span class="bar"><i style="width:' + Math.round(g.pct*100) + '%"></i></span>' +
           '<span>' + (g.next
-            ? L2(g.daysLeft + ' ng\u00e0y n\u1eefa', g.daysLeft + ' days')
+            ? L2(g.xpLeft + ' XP n\u1eefa', g.xpLeft + ' XP to go')
             : L2('\u0111\u00e3 tr\u01b0\u1edfng th\u00e0nh','fully grown')) + '</span>' +
         '</div>' +
         '<div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">' +
-          L2('Ng\u00e0y ' + TobbyGrowth.ageDays(), 'Day ' + TobbyGrowth.ageDays()) +
-          ' \u00b7 ' + (T.xp||0) + ' XP \u00b7 ' +
-          L2('\u0111\u00e3 cho \u0103n ' + (b.fedCount||0) + ' l\u1ea7n', (b.fedCount||0) + ' meals') +
+          (T.xp||0) + ' XP \u00b7 ' +
+          esc(LANG==='en' ? tobbyBondLevel().en : tobbyBondLevel().vi) +
+          ' \u00b7 ' + L2('\u0111\u00e3 cho \u0103n ' + (b.fedCount||0) + ' l\u1ea7n', (b.fedCount||0) + ' meals') +
         '</div>' +
         (ready ? '' : '<div class="tb-borrowed">' +
           L2('Ch\u01b0a t\u1ea3i \u0111\u01b0\u1ee3c h\u00ecnh 3D \u2014 v\u1eabn cho \u0103n v\u00e0 thay \u0111\u1ed3 \u0111\u01b0\u1ee3c nh\u01b0 th\u01b0\u1eddng.',
@@ -13062,6 +13320,48 @@ function tobbyCarePanel(){
 
   draw();
 }
+/** A short line over his head. Auto-dismissed; never blocks anything. */
+let tbSpeechTimer = 0;
+function tobbySay(text, ms){
+  if(!text) return;
+  document.querySelectorAll('.tb-speech').forEach(e=> e.remove());
+  const dock = document.getElementById('tobbyDock');
+  if(!dock) return;
+  const el = document.createElement('div');
+  el.className = 'tb-speech';
+  el.textContent = text;
+  document.body.appendChild(el);
+  const d = dock.getBoundingClientRect();
+  const w = el.offsetWidth, h = el.offsetHeight;
+  el.style.left = Math.max(8, Math.min(d.left + d.width/2 - w/2, innerWidth - w - 8)) + 'px';
+  el.style.top  = Math.max(8, d.top - h - 10) + 'px';
+  clearTimeout(tbSpeechTimer);
+  tbSpeechTimer = setTimeout(()=>{
+    el.classList.add('out');
+    setTimeout(()=> el.remove(), 220);
+  }, ms || 3200);
+}
+/** Six sparks off the top of him. Deliberately small: the brief asks for a
+ *  moment, not a mobile-game popup. */
+function tobbySparks(n){
+  if(tbReduceMotion()) return;
+  const dock = document.getElementById('tobbyDock');
+  if(!dock) return;
+  const d = dock.getBoundingClientRect();
+  const cx = d.left + d.width/2, cy = d.top + d.height*0.35;
+  for(let i = 0; i < (n||6); i++){
+    const s = document.createElement('div');
+    s.className = 'tb-spark';
+    const a = (-0.5 - Math.random()) * Math.PI, r = 26 + Math.random()*30;
+    s.style.setProperty('--dx', Math.cos(a)*r + 'px');
+    s.style.setProperty('--dy', Math.sin(a)*r + 'px');
+    s.style.left = (cx - 2 + (Math.random()-0.5)*18) + 'px';
+    s.style.top  = (cy - 2) + 'px';
+    s.style.animationDelay = (i*40) + 'ms';
+    document.body.appendChild(s);
+    setTimeout(()=> s.remove(), 1100 + i*40);
+  }
+}
 /** Put him in the DOM and keep him there.
  *
  *  render() rebuilds the whole shell, so the stage element is a NEW node on
@@ -13091,6 +13391,7 @@ function wireTobbyStage(){
     TobbyAnim.start();
     TobbyGrowth.tick();
     TobbyGrowth.apply();
+    tobbyWelcomeBack();
     TobbyWear.unlocked();
     TobbyWear.apply();
     TobbyBowl.apply();
