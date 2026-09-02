@@ -2752,6 +2752,87 @@ body{
   100%{opacity:0; transform:translate(16px,-34px) scale(1.1);}
 }
 :root:not([data-motion="full"]) .tb-zzz{display:none;}
+/* The evolution moment. Everything else in the app steps back for four
+   seconds: the page is dimmed and softened, he is lifted above it and drawn
+   larger, and one card names what he became. No confetti, no modal buttons,
+   no sound — the brief asks for Notion, not for a mobile game. */
+.tb-evo-veil{
+  position:fixed; inset:0; z-index:1000;
+  background:color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter:blur(3px) saturate(.85);
+  -webkit-backdrop-filter:blur(3px) saturate(.85);
+  opacity:0; transition:opacity .45s ease;
+  cursor:pointer;
+}
+.tb-evo-veil[data-on="1"]{opacity:1;}
+/* A ring of light behind him, sized to the enlarged dock. */
+.tb-evo-glow{
+  position:fixed; z-index:1001; pointer-events:none;
+  border-radius:50%;
+  background:radial-gradient(circle, color-mix(in srgb, var(--brand) 28%, transparent) 0%, transparent 68%);
+  opacity:0; transform:scale(.6);
+  transition:opacity .6s ease, transform .9s cubic-bezier(.2,.7,.3,1);
+}
+.tb-evo-glow[data-on="1"]{opacity:1; transform:scale(1);}
+/* He is lifted over the veil and drawn larger, pinned by the feet so the floor
+   line does not move while he grows, and walked to the middle for the duration.
+   The middle is not decoration: he lives in the bottom-right corner, and at
+   1.55x from there the enlarged dog ran off the right edge of the screen —
+   the one thing the whole sequence exists to show, clipped.
+
+   The transition lives on [data-evolving] with no value, so it still applies
+   while the attribute is being taken away and he walks back rather than
+   snapping. */
+.tobby-dock[data-evolving]{
+  transform-origin:bottom center;
+  transition:transform .9s cubic-bezier(.2,.7,.3,1);
+}
+.tobby-dock[data-evolving="1"]{
+  z-index:1002;
+  transform:translateX(var(--tb-evo-dx, 0px)) scale(var(--tb-evo-scale, 1.55));
+}
+.tobby-dock[data-evolving="1"] canvas{image-rendering:pixelated;}
+.tb-evo-card{
+  position:fixed; z-index:1003; left:50%; top:38%;
+  transform:translate(-50%,-50%) translateY(8px);
+  width:min(340px, calc(100vw - 32px));
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius); box-shadow:var(--shadow-lg);
+  padding:18px 20px; text-align:center; pointer-events:none;
+  opacity:0; transition:opacity .5s ease, transform .5s cubic-bezier(.2,.7,.3,1);
+}
+.tb-evo-card[data-on="1"]{opacity:1; transform:translate(-50%,-50%) translateY(0);}
+.tb-evo-kicker{
+  font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--brand); margin-bottom:8px;
+}
+.tb-evo-name{font-size:19px; font-weight:700; color:var(--text); line-height:1.25;}
+.tb-evo-from{font-size:12.5px; color:var(--text-2); margin-top:5px;}
+.tb-evo-meta{
+  margin-top:13px; padding-top:11px; border-top:1px solid var(--border);
+  display:flex; justify-content:center; gap:14px;
+  font-size:11.5px; color:var(--text-3);
+}
+.tb-evo-meta b{color:var(--text-2); font-weight:600;}
+/* Mobile: the card sits low so it never lands on top of him, and he grows
+   less because there is less room to grow into. */
+@media (max-width:640px){
+  .tb-evo-card{top:auto; bottom:calc(88px + env(safe-area-inset-bottom, 0px) + 74px);
+    transform:translate(-50%,0) translateY(8px); padding:15px 17px;}
+  .tb-evo-card[data-on="1"]{transform:translate(-50%,0) translateY(0);}
+  .tb-evo-name{font-size:17px;}
+  /* The mobile enlargement is set from script alongside the walk-to-centre, so
+     the two are decided in one place rather than half here and half there. */
+}
+/* Reduced motion keeps the information and drops the theatre: no blur, no
+   growing, no glow — the card simply appears and goes. */
+:root:not([data-motion="full"]) .tb-evo-veil{
+  backdrop-filter:none; -webkit-backdrop-filter:none; transition:none;
+  background:color-mix(in srgb, var(--bg) 55%, transparent);
+}
+:root:not([data-motion="full"]) .tb-evo-glow{display:none;}
+:root:not([data-motion="full"]) .tobby-dock[data-evolving="1"]{transform:none; transition:none;}
+:root:not([data-motion="full"]) .tb-evo-card{transition:none;}
 .tb-sec{font-size:9.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
   color:var(--text-3); margin:16px 0 7px;}
 .tb-sec:first-of-type{margin-top:0;}
@@ -11705,6 +11786,7 @@ const TobbyRig = {
       Object.assign(this.renderer.domElement.style, { width:'100%', height:'100%', display:'block' });
 
       this.scan();
+      this.findStageRigs();
       this.resize();
       this.ready = true; this.loading = false;
       return true;
@@ -11716,6 +11798,45 @@ const TobbyRig = {
     }
   },
 
+
+  /** Look for a separate rig per evolution stage inside the loaded GLB.
+   *
+   *  The brief expects five rigs named PUPPY/BABY/Young/TEEN/adult and says
+   *  not to assume node indexes, so this walks the scene by name. Matching is
+   *  case- and separator-insensitive because GLTFLoader rewrites names on
+   *  import (dots do not survive it) and because the brief's own spelling is
+   *  inconsistent — `adult` and `Young` in the same list.
+   *
+   *  It is written to find them if they are there. In the GLB this app ships
+   *  they are NOT: the file has one scene root (`Tobby`) with three children
+   *  — ROOT, prop_workstation, bowl_root — no skins, and not a single node
+   *  whose name mentions a stage. The rig's own extras explain why: "one clip
+   *  library drives every stage", with stages expressed as scale parameters
+   *  on shared bones. So this returns nothing for that file and apply() takes
+   *  the parameter path instead. Drop in a GLB that really does carry five
+   *  rigs and the visibility path takes over with no further changes. */
+  findStageRigs(){
+    const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const index = {};
+    this.root.traverse(o=>{
+      const k = norm(o.name);
+      if(k && !index[k]) index[k] = o;      // first match wins, shallowest first
+    });
+    const map = {}, missing = [];
+    EVOLUTION_STAGES.forEach(s=>{
+      const hit = index[norm(s.rig)];
+      if(hit) map[s.rig] = hit; else missing.push(s.rig);
+    });
+    this.stageRigs = map;
+    // All five, or none. A partial match would hide the stages it found and
+    // leave the rest showing the whole dog, which is worse than not trying.
+    this.hasStageRigs = missing.length === 0;
+    if(!this.hasStageRigs && Object.keys(map).length){
+      console.warn('[TobbyRig] evolution rigs partially present, ignoring:',
+                   Object.keys(map).join(', '), '- missing:', missing.join(', '));
+    }
+    return { found:Object.keys(map), missing, hasAll:this.hasStageRigs };
+  },
   /** Read the rig's own structure. Everything the rest of Tobby knows about
    *  outfits, expressions and the bowl comes from here — nothing is listed
    *  twice, so the model stays the single source of truth. */
@@ -12373,7 +12494,10 @@ const TobbyBrain = {
   /* ---------- CELEBRATION ---------- */
   celebrate(){ this.feel('excited', 2400); TobbyAnim.playAction('Tobby_Celebrate'); },
   levelUp(){   this.feel('proud', 3000);   TobbyAnim.playAction('Tobby_LevelUp'); },
-  evolve(){    this.feel('proud', 4200);   TobbyAnim.playAction('Tobby_Evolution'); },
+  // Long enough to outlast the ceremony. At 4.2s the pride expired the instant
+  // the clip ended and the resting mood took over — so he finished evolving and
+  // immediately looked worried, which is not the note to end on.
+  evolve(){    this.feel('proud', 8000);   TobbyAnim.playAction('Tobby_Evolution'); },
   beProud(){   this.feel('proud', 2400);   TobbyAnim.setBase('Tobby_Proud'); },
 
   /** Where he was standing last time. Saved on arrival so a reload does not
@@ -12437,7 +12561,8 @@ function tobbyDefaults(){
   return {
     x:null, firstMetAt:nowISO(), ageDays:0, lastTick:Date.now(),
     stage:'tiny', worn:[], unlocked:['scarf'],
-    bowl:{ kind:'empty', color:null, fedCount:0, lastFedAt:null },
+    stageRigs:{}, hasStageRigs:false,
+  bowl:{ kind:'empty', color:null, fedCount:0, lastFedAt:null },
     /* Growth is earned, not clocked. `xp` comes from finished work; `bond`
        from the relationship; `ageDays` is kept only so he can say how long he
        has known you, never to decide how grown he is. */
@@ -12470,46 +12595,62 @@ function tobby(){
    Age is wall-clock. Thirty days away is thirty days older; no amount of
    finished work brings it forward, which is the whole point of a timeline.
    ========================================================= */
-/* Five stages. The rig ships no per-stage meshes and does not key ROOT's
-   scale, so a stage is a set of proportions on real bones plus how much of the
-   coat has filled in — a puppy is mostly head and ears with no floof, and it
-   narrows toward the adult's real proportions. `floof` is a fraction rather
-   than a flag so the coat thickens gradually instead of appearing in one go. */
-/* Five stages, named by the rig itself: its extras list
-   evolutionStages = [Puppy, Baby, Young, Teen, Adult], in that order, and
-   `rig` below is the name each of ours answers to.
+/* The five stages, and how each one is built.
+   ---------------------------------------------------------
+   The rig names them itself: extras.evolutionStages is
+   [Puppy, Baby, Young, Teen, Adult], in that order.
 
-   The rig also says WHICH knobs a stage turns — "uniform rig scale s,
-   leg-chain scale leg (hip bones y-scale), ear bone scale earW/earL, head bone
-   scale head, floof groups on/off" — but leaves the numbers to us. The leg
-   chain is the one that matters most and the one I had been missing: without
-   it a puppy is just a small adult, and the whole point of a stage is that the
-   PROPORTIONS change. Short legs and a big head read as young; the same dog
-   scaled down does not. */
-/* YOUNG IS THE BASELINE, not the adult. The rig's own extras say
-   growthStage: "Young", and the stage sheet calls Young "bản hiện tại" — the
-   model as authored IS the middle stage. Everything is expressed relative to
-   it: the two below are smaller, the two above are larger. Building the table
-   the other way round, with the adult at 1.0, made every stage a shrunken
-   version of a dog that never existed.
+   IT DOES NOT SHIP FIVE MESHES. There is one scene root, `Tobby`, with three
+   children (ROOT, prop_workstation, bowl_root), no skins, and not one node
+   named after a stage. The file says so in its own words: "Bone names never
+   change, so one clip library drives every stage", with a stage expressed as
+   "uniform rig scale s, leg-chain scale leg (hip bones y-scale), ear bone
+   scale earW/earL, head bone scale head, floof groups on/off". So that is what
+   the numbers below are, and TobbyGrowth.apply() switches to showing a real
+   per-stage rig the moment a GLB provides one.
 
-   The sheet also gives each stage its defining trait, and they are not all the
-   same knob: Teen is "tai dài, to" and Adult is "to, lông xù". So the ears are
-   two knobs, as the rig says (earW/earL) — measured, the ear hangs 0.22 along
-   Y and is 0.05 x 0.12 across, so LENGTH is Y and WIDTH is X and Z. A teen
-   gets longer ears, not merely bigger ones; an adult gets the coat. */
-const TOBBY_STAGES = [
-  { key:'tiny',  rig:'Puppy', vi:'Cún sơ sinh',        en:'Tiny Puppy',  xp:0,
+   YOUNG IS THE BASELINE. extras.growthStage says "Young": the model as
+   authored is the MIDDLE stage, so the two below it are smaller and the two
+   above are larger. Writing the table the other way round, with the adult at
+   1.0, made every stage a shrunken version of a dog that never existed.
+
+   Each stage has a defining trait and they are not all the same knob, which is
+   why `ear` is two numbers. Measured in the file the ear hangs 0.22 down Y and
+   is 0.05 x 0.12 across, so earL is LENGTH (Y) and earW is width (X and Z): a
+   teen's ears get long, not merely big. An adult's trait is the coat instead,
+   and `floof` is a fraction rather than a flag so it thickens over two stages
+   instead of appearing all at once. */
+/** The five stages, in the shape the brief specifies: stage number, display
+ *  name, and the name of the rig each one asks the GLB for. This is the only
+ *  place any of it is written down — nothing below re-derives a stage from an
+ *  XP number of its own.
+ *
+ *  `rig` is spelled exactly as the brief spells it. TobbyRig.findStageRigs()
+ *  matches it against the file case- and separator-insensitively, so a GLB
+ *  that spells them Puppy/BABY/young still lines up.
+ *
+ *  The proportion fields (size/leg/head/earW/earL/floof) are the FALLBACK
+ *  path, used only when the loaded GLB has no separate rig for a stage. See
+ *  TobbyGrowth.apply(). */
+const EVOLUTION_STAGES = [
+  { stage:1, name:'Tiny Puppy',  rig:'PUPPY',
+    key:'tiny',  vi:'Cún sơ sinh',        en:'Tiny Puppy',  xp:0,
     size:0.62, leg:0.72, head:1.30, earW:1.00, earL:0.80, floof:0    },
-  { key:'baby',  rig:'Baby',  vi:'Cún nhỏ',            en:'Puppy',       xp:150,
+  { stage:2, name:'Baby',        rig:'BABY',
+    key:'baby',  vi:'Cún nhỏ',            en:'Baby',        xp:150,
     size:0.78, leg:0.85, head:1.16, earW:1.00, earL:0.88, floof:0.15 },
-  { key:'young', rig:'Young', vi:'Cún lớn',            en:'Young Tobby', xp:600,
+  { stage:3, name:'Young Tobby', rig:'Young',
+    key:'young', vi:'Cún lớn',            en:'Young Tobby', xp:600,
     size:1.00, leg:1.00, head:1.00, earW:1.00, earL:1.00, floof:0.45 },
-  { key:'teen',  rig:'Teen',  vi:'Tobby thiếu niên',   en:'Teen Tobby',  xp:1800,
+  { stage:4, name:'Teen Tobby',  rig:'TEEN',
+    key:'teen',  vi:'Tobby thiếu niên',   en:'Teen Tobby',  xp:1800,
     size:1.10, leg:1.06, head:0.97, earW:1.05, earL:1.40, floof:0.70 },
-  { key:'adult', rig:'Adult', vi:'Tobby trưởng thành', en:'Adult Tobby', xp:4000,
+  { stage:5, name:'Adult Tobby', rig:'adult',
+    key:'adult', vi:'Tobby trưởng thành', en:'Adult Tobby', xp:4000,
     size:1.20, leg:1.10, head:0.95, earW:1.10, earL:1.30, floof:1.00 },
 ];
+/** The name the rest of the file has always used. Same array, not a copy. */
+const TOBBY_STAGES = EVOLUTION_STAGES;
 const TOBBY_DAY_MS = 86400000;
 const TobbyGrowth = {
   /** Days lived, banked on the wall clock so a machine left closed still ages. */
@@ -12539,10 +12680,35 @@ const TobbyGrowth = {
     return { pct: Math.min(1, (this.xp()-cur.xp)/span), cur, next:nx,
              xpLeft: Math.max(0, nx.xp - this.xp()) };
   },
-  /** Put the proportions on the bones. */
+  /** Show the stage the XP has earned.
+   *
+   *  Two paths, and which one runs is decided by the GLB, not by a flag:
+   *
+   *  1. If the file carries a separate rig per stage, show that stage's rig
+   *     and hide the other four. Nothing else is touched — no scaling, no
+   *     bone edits — so the rigs appear exactly as the artist built them.
+   *
+   *  2. Otherwise use the mechanism the loaded rig documents in its own
+   *     extras: "uniform rig scale s, leg-chain scale leg (hip bones
+   *     y-scale), ear bone scale earW/earL, head bone scale head, floof
+   *     groups on/off". That is not a uniform resize — the proportions change
+   *     and 21 separate coat meshes come and go — but it is also not five
+   *     rigs, and it cannot be, because this file does not contain five. */
   apply(){
     if(!TobbyRig.ready) return false;
     const s = this.current();
+
+    if(TobbyRig.hasStageRigs){
+      EVOLUTION_STAGES.forEach(x=>{
+        const o = TobbyRig.stageRigs[x.rig];
+        if(o) o.visible = (x.key === s.key);
+      });
+      tobby().stage = s.key;
+      TobbyRig._restBox = null;
+      TobbyRig.frame();
+      return true;
+    }
+
     TobbyRig.root.scale.setScalar(s.size);
     const head = TobbyRig.bones.head;   if(head) head.scale.setScalar(s.head);
     // Ears are two knobs, as the rig names them. Length runs down Y; width is
@@ -12582,25 +12748,153 @@ const TobbyGrowth = {
     const T = tobby();
     const want = this.current().key;
     if(T.stage === want){ this.apply(); return null; }
+    const from = TOBBY_STAGES.find(x=> x.key === T.stage) || null;
     T.stage = want; persist();
-    this.apply();
     const s = this.current();
-    // A moment, not a fanfare: he jumps, a few sparks, one line. No modal, no
-    // full-screen takeover — the brief is explicit that this must not feel
-    // like a mobile game.
-    // The sparks are not placed here: Tobby_Evolution carries its own table
-    // (charge at 0.7s, transformation at 1.5, settle at 4.0) and the
-    // dispatcher fires them on those beats as the clip plays.
-    try{
-      TobbyBrain.evolve();
-      tobbySay(TB_L('Mình lớn rồi nè.','We grew up.'), 4200);
-    }catch(e){}
+    // apply() is deliberately NOT called here: the ceremony applies it on the
+    // transformation beat of the clip, and calls it again on the way out so a
+    // skipped or impossible ceremony still leaves him at the right stage.
+    try{ tobbyEvolutionCeremony(from, s); }catch(e){ this.apply(); }
+    // The speech bubble would collide with the ceremony card, so it waits
+    // until the card has gone.
+    setTimeout(()=>{ try{ tobbySay(TB_L('Mình lớn rồi nè.','We grew up.'), 3200); }catch(e){} }, 4800);
     tobbyRemember('CHARACTER_EVENT', TB_L('Tiến hóa thành ' + s.vi, 'Evolved into ' + s.en), { stage:s.key });
     tobbyBond(TB_BOND.MILESTONE, 'evolution');
     return s;
   },
 };
 
+/* =========================================================
+   The evolution moment
+   ---------------------------------------------------------
+   Four seconds, once per stage, five times in the life of the app. It has to
+   be worth stopping for and it has to be over quickly, so: the page softens,
+   he is lifted above it and drawn larger, Tobby_Evolution plays with the
+   particle beats the rig itself specifies, and the change of stage lands on
+   the transformation beat rather than before or after it. Then one card names
+   what he became and everything returns.
+
+   Clicking anywhere, or Escape, ends it early and leaves him evolved — an
+   animation nobody can skip is a bad animation.
+   ========================================================= */
+let tbEvoRunning = false;
+function tobbyEvolutionCeremony(from, to){
+  // Never two at once, and never one the user cannot see.
+  if(tbEvoRunning){ TobbyGrowth.apply(); return; }
+  const dock = document.getElementById('tobbyDock');
+  if(!dock || document.hidden){ TobbyGrowth.apply(); return; }
+  tbEvoRunning = true;
+
+  const reduced = tbReduceMotion();
+  const L2 = (vi, en)=> (LANG === 'en' ? en : vi);
+  const nameOf = st => LANG === 'en' ? st.en : st.vi;
+
+  const veil = document.createElement('div');
+  veil.className = 'tb-evo-veil';
+  const glow = document.createElement('div');
+  glow.className = 'tb-evo-glow';
+  const card = document.createElement('div');
+  card.className = 'tb-evo-card';
+  document.body.appendChild(veil);
+  document.body.appendChild(glow);
+  document.body.appendChild(card);
+
+  // Where he is now, and where he goes for the ceremony: same floor, middle of
+  // the screen. Measured BEFORE the transform is applied, so `d0` is his true
+  // resting box and the walk is computed from it rather than from a box that is
+  // already moving.
+  const scaleFor = ()=> (window.innerWidth <= 640 ? 1.3 : 1.55);
+  const place = ()=>{
+    const d0 = dock.getBoundingClientRect();
+    const sc = scaleFor();
+    // While the attribute is on, d0 already includes the transform; undo it so
+    // the sums below are always in resting units.
+    const on = dock.dataset.evolving === '1';
+    const w0 = on ? d0.width / sc : d0.width;
+    const h0 = on ? d0.height / sc : d0.height;
+    const cx0 = on ? d0.left + d0.width/2 - (parseFloat(dock.style.getPropertyValue('--tb-evo-dx')) || 0)
+                   : d0.left + d0.width/2;
+    const dx = Math.round(window.innerWidth/2 - cx0);
+    dock.style.setProperty('--tb-evo-dx', dx + 'px');
+    dock.style.setProperty('--tb-evo-scale', sc);
+    // The glow sits at his DESTINATION from the start. It fades and swells in
+    // over the same beat that he walks, and both are soft enough that the two
+    // arriving together reads as one movement.
+    const r = Math.max(w0, h0) * sc * 2.1;
+    glow.style.width = r + 'px';
+    glow.style.height = r + 'px';
+    glow.style.left = (window.innerWidth/2 - r/2) + 'px';
+    glow.style.top  = (d0.bottom - h0*sc*0.55 - r/2) + 'px';
+  };
+  place();
+
+  const timers = [];
+  const at = (ms, fn)=> timers.push(setTimeout(fn, ms));
+  let done = false;
+  const finish = ()=>{
+    if(done) return; done = true;
+    timers.forEach(clearTimeout);
+    window.removeEventListener('resize', place);
+    document.removeEventListener('keydown', onKey);
+    veil.removeAttribute('data-on'); glow.removeAttribute('data-on');
+    card.removeAttribute('data-on');
+    // "0" rather than gone: the transition is keyed to the attribute's presence,
+    // so he walks back to his corner instead of snapping to it. The attribute
+    // and the custom properties go once he has arrived.
+    dock.dataset.evolving = '0';
+    setTimeout(()=>{ veil.remove(); glow.remove(); card.remove(); }, reduced ? 0 : 520);
+    setTimeout(()=>{
+      dock.removeAttribute('data-evolving');
+      dock.style.removeProperty('--tb-evo-dx');
+      dock.style.removeProperty('--tb-evo-scale');
+    }, reduced ? 0 : 950);
+    // Whatever happened above, he ends up at the stage he earned.
+    TobbyGrowth.apply();
+    tbEvoRunning = false;
+  };
+  const onKey = e=>{ if(e.key === 'Escape') finish(); };
+  veil.addEventListener('click', finish);
+  document.addEventListener('keydown', onKey);
+  window.addEventListener('resize', place);
+
+  const showCard = ()=>{
+    const g = TobbyGrowth.progress();
+    card.innerHTML =
+      '<div class="tb-evo-kicker">' + L2('Tiến hóa', 'Evolved') + '</div>' +
+      '<div class="tb-evo-name">' + esc(nameOf(to)) + '</div>' +
+      (from ? '<div class="tb-evo-from">' +
+        esc(L2('Từ ' + nameOf(from), 'from ' + nameOf(from))) + '</div>' : '') +
+      '<div class="tb-evo-meta">' +
+        '<span><b>' + (tobby().xp||0).toLocaleString(LANG==='en'?'en-US':'vi-VN') + '</b> XP</span>' +
+        '<span>' + esc(L2('Giai đoạn', 'Stage')) + ' <b>' + to.stage + '/' + EVOLUTION_STAGES.length + '</b></span>' +
+      '</div>';
+    card.setAttribute('data-on', '1');
+  };
+
+  if(reduced){
+    // No theatre: apply the stage, state the fact, move on.
+    TobbyGrowth.apply();
+    veil.setAttribute('data-on', '1');
+    showCard();
+    at(2600, finish);
+    return;
+  }
+
+  requestAnimationFrame(()=>{
+    veil.setAttribute('data-on', '1');
+    glow.setAttribute('data-on', '1');
+    dock.setAttribute('data-evolving', '1');
+    place();
+  });
+  try{ TobbyBrain.evolve(); }catch(e){}
+
+  // Tobby_Evolution runs 4.0s and its own table fires PIXEL_CHARGE at 0.7,
+  // PIXEL_TRANSFORMATION at 1.5 and PIXEL_SETTLE at 4.0. The new stage lands
+  // on the transformation, hidden inside the brightest moment of the clip.
+  at(1500, ()=>{ TobbyGrowth.apply(); place(); });
+  at(1850, showCard);
+  at(4600, finish);
+}
 /* =========================================================
    XP — what finished work is worth
    ---------------------------------------------------------
@@ -12612,6 +12906,8 @@ const TobbyGrowth = {
    ========================================================= */
 const TB_XP = {
   TASK:            10,
+  FEED:             4,      // care nudges growth along
+  FEED_DAILY_CAP:   8,      // … but cannot replace it
   TASK_IMPORTANT:  20,      // ASAP or Cao
   PROJECT:        100,
   GOAL:           150,      // no goals feature yet; the hook is here for one
@@ -13039,17 +13335,24 @@ function tobbyFeed(kind){
  *  meal and cut it short while paying out its XP early. */
 function tobbyEndMeal(opts){
   clearTimeout(tbFeedTimer); tbFeedTimer = 0;
-  const bowl = tobby().bowl;
+  const T = tobby(), bowl = T.bowl;
   const wasFed = bowl.kind !== 'empty';
   bowl.kind = 'empty';
   persist();
   TobbyBowl.apply();
   if(!wasFed) return;
-  // Taking the food away is not a meal. And a finished one pays the
-  // RELATIONSHIP, not XP: feeding him is care, not work, and letting care
-  // grow him up would make the growth meaningless.
+  // Taking the food away is not a meal. A finished one pays the RELATIONSHIP
+  // in full, and a little XP as well so that looking after him does move him
+  // toward the next stage — but capped per day, because a stage should still
+  // be something the WORK earned. Two meals a day is 8 XP against the 10 a
+  // single finished task is worth.
   if(!(opts && opts.cancel)){
     tobbyBond(TB_BOND.FEED, 'feed');
+    const today = new Date().toISOString().slice(0,10);
+    if(T.feedXpDay !== today){ T.feedXpDay = today; T.feedXpToday = 0; }
+    const room = Math.max(0, TB_XP.FEED_DAILY_CAP - (T.feedXpToday || 0));
+    const gain = Math.min(TB_XP.FEED, room);
+    if(gain > 0){ T.feedXpToday = (T.feedXpToday || 0) + gain; tobbyGainXP(gain, 'feed'); }
     tobbyRemember('INTERACTION', TB_L('Được cho ăn', 'Was fed'), {});
   }
   if(TobbyAnim.actionName === 'Tobby_EatFromBowl') TobbyAnim.endAction();
