@@ -4834,6 +4834,7 @@ function toggleTaskDone(id, srcEl){
 
   if(activeTimer && activeTimer.taskId===id) stopTimer();
   registerCombo();
+  try{ TobbyBrain.taskDone(); }catch(e){}
   // Let the tick draw + burst play, then re-render so counters and bars animate.
   if(srcEl){
     srcEl.classList.add('done','just-done');
@@ -5007,9 +5008,10 @@ function refreshWeather(){
     }).then(j=>{
       const cur = j.current || {};
       const kind = weatherKindFromCode(cur.weather_code|0, cur.wind_speed_10m||0, cur.is_day===0);
+      const manual = weatherPlace();
       WEATHER = {
         kind, temp: Math.round(cur.temperature_2m),
-        place: `${pos.lat.toFixed(1)}, ${pos.lon.toFixed(1)}`,
+        place: manual ? manual.name : `${pos.lat.toFixed(1)}, ${pos.lon.toFixed(1)}`,
         at: Date.now(), source: pos.source,
       };
       try{ localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify(WEATHER)); }catch(e){}
@@ -5025,9 +5027,37 @@ function refreshWeather(){
     applyWeatherScene(kind);
   });
 }
+/** A place the user typed, if they have set one. Checked BEFORE geolocation.
+ *
+ *  This exists because geolocation is the kind of permission people dismiss
+ *  without reading, and dismissing it used to mean the weather silently became
+ *  a clock: `clear` by day, `night` after dusk, and rain that could never
+ *  appear however hard it was raining outside. A typed city is the difference
+ *  between a feature that quietly does nothing and one that works. */
+function weatherPlace(){
+  const p = STATE.settings && STATE.settings.weatherPlace;
+  return (p && typeof p.lat === 'number' && typeof p.lon === 'number') ? p : null;
+}
+/** Open-Meteo's geocoder — same family as the forecast, also key-free. */
+function weatherSearchPlace(q){
+  const url = 'https://geocoding-api.open-meteo.com/v1/search?count=5&language=vi&format=json'
+            + '&name=' + encodeURIComponent(String(q||'').trim());
+  return fetch(url).then(r=>{
+    if(!r.ok) throw new Error('http '+r.status);
+    return r.json();
+  }).then(j=> (j.results||[]).map(r=>({
+    name: [r.name, r.admin1, r.country].filter(Boolean).join(', '),
+    lat: Math.round(r.latitude*100)/100,
+    lon: Math.round(r.longitude*100)/100,
+  })));
+}
 /** Browser geolocation, rounded down to two decimals (~1.1km) before use. */
 function locateCoarse(){
   return new Promise((resolve)=>{
+    // A place the user chose outranks the browser: they said where they are,
+    // and no permission prompt can be more accurate than that.
+    const manual = weatherPlace();
+    if(manual) return resolve({ lat:manual.lat, lon:manual.lon, source:'manual' });
     if(!navigator.geolocation) return resolve(null);
     let settled = false;
     const done = (v)=>{ if(!settled){ settled = true; resolve(v); } };
@@ -5455,8 +5485,16 @@ function weatherLabel(){
   if(!WEATHER.kind) return 'Đang lấy dữ liệu…';
   const k = WEATHER_KINDS[WEATHER.kind];
   const t = WEATHER.temp != null ? ` · ${WEATHER.temp}°C` : '';
-  const src = WEATHER.source==='fallback' ? ' (theo giờ trong ngày)' : '';
+  const src = WEATHER.source==='fallback' ? ' (theo giờ trong ngày)'
+            : WEATHER.place ? ` · ${WEATHER.place}` : '';
   return `${k.icon} ${k.name}${t}${src}`;
+}
+/** Is the scene invented from the clock rather than measured?
+ *  Worth its own question because the answer decides whether the user is
+ *  looking at the weather or at a guess, and the old build said so only in a
+ *  four-word aside that nobody would read as "this is not real". */
+function weatherIsGuess(){
+  return weatherEnabled() && WEATHER.kind && WEATHER.source === 'fallback';
 }
 
 /* =========================================================
@@ -5777,7 +5815,15 @@ function wireTaskContextMenus(root){
 
 function toggleTimer(id){
   if(activeTimer && activeTimer.taskId===id) stopTimer();
-  else { if(activeTimer) stopTimer(); activeTimer = {taskId:id, startedAt:Date.now()}; toast('Đã bắt đầu tính giờ'); renderView(); }
+  else {
+    if(activeTimer) stopTimer();
+    activeTimer = {taskId:id, startedAt:Date.now()};
+    // Focus is a posture he holds for as long as the timer runs, not a
+    // one-shot — and Tobby_Focused is one of the three clips that bring the
+    // desk with them, so the workstation appears without being managed.
+    try{ TobbyBrain.work('focused'); }catch(e){}
+    toast('Đã bắt đầu tính giờ'); renderView();
+  }
 }
 function stopTimer(){
   if(!activeTimer) return;
@@ -5786,7 +5832,9 @@ function stopTimer(){
   if(t){ t.timeLogs=t.timeLogs||[]; t.timeLogs.push({start:new Date(activeTimer.startedAt).toISOString(), end:nowISO(), minutes});
     t.actualHours = +((( t.actualHours||0) + minutes/60).toFixed(2)); t.updatedAt=nowISO(); persist(); }
   toast(`Đã ghi nhận ${minutes} phút`);
-  activeTimer = null; renderView();
+  activeTimer = null;
+  try{ TobbyBrain.beProud(); }catch(e){}
+  renderView();
 }
 function weekTimeLogged(){
   const start = new Date(); start.setDate(start.getDate()-start.getDay()); start.setHours(0,0,0,0);
@@ -10706,6 +10754,25 @@ function settingsAmbiencePanel(){
     <div style="font-size:12px;color:var(--text-3);">Hiện tại: <b style="color:var(--text);">${weatherLabel()}</b>
       ${wOn?` <button class="btn btn-ghost btn-sm" id="weatherRefresh" style="margin-left:8px;">${icon('refresh',13)} Cập nhật</button>`:''}
     </div>
+    ${wOn && weatherIsGuess() ? `<div style="margin-top:12px;padding:10px 12px;border-radius:10px;
+      background:color-mix(in srgb, var(--warning, #E0A33A) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--warning, #E0A33A) 40%, transparent);
+      font-size:12px;line-height:1.55;">
+      <b>Đang đoán theo giờ, không phải thời tiết thật.</b> App không lấy được vị trí — có thể bạn
+      chưa cấp quyền, hoặc trình duyệt chặn. Ở chế độ này trời <b>luôn nắng hoặc quang đêm</b>,
+      mưa và bão sẽ không bao giờ hiện. Nhập thành phố bên dưới để lấy dữ liệu thật.
+    </div>` : ''}
+    ${wOn?`<div class="field" style="margin-top:14px;">
+      <label>Thành phố ${weatherPlace()
+        ? `<span class="badge success" style="margin-left:6px;">${esc(weatherPlace().name)}</span>` : ''}</label>
+      <div style="display:flex;gap:8px;">
+        <input id="wxPlace" type="text" autocomplete="off" spellcheck="false" style="flex:1;"
+          placeholder="VD: Hà Nội, Đà Nẵng, Hồ Chí Minh…">
+        <button class="btn btn-ghost btn-sm" id="wxSearch" type="button">Tìm</button>
+        ${weatherPlace()?`<button class="btn btn-ghost btn-sm" id="wxClearPlace" type="button">Dùng GPS</button>`:''}
+      </div>
+      <div id="wxPlaceOut" style="font-size:12px;color:var(--text-3);margin-top:8px;"></div>
+    </div>`:''}
     ${wOn?`<div class="pill-toggle-row" style="margin-top:14px;">
       <span style="font-size:11.5px;color:var(--text-3);align-self:center;margin-right:4px;">Xem thử:</span>
       ${Object.keys(WEATHER_KINDS).map(k=>`<button class="pill-toggle" data-weather-preview="${k}">${WEATHER_KINDS[k].icon} ${WEATHER_KINDS[k].name}</button>`).join("")}
@@ -10903,6 +10970,52 @@ function wireSettings(){
   });
   const wr = document.getElementById('weatherRefresh');
   if(wr) wr.onclick = ()=>{ WEATHER.at = 0; refreshWeather(); toast('Đang cập nhật thời tiết…'); };
+
+  /* --- a place typed by hand, for when geolocation is not available --- */
+  const wxIn = document.getElementById('wxPlace');
+  const wxOut = document.getElementById('wxPlaceOut');
+  const wxGo = document.getElementById('wxSearch');
+  const useIt = (p)=>{
+    STATE.settings.weatherPlace = p;
+    persist();
+    WEATHER.at = 0;
+    refreshWeather();
+    toast('Thời tiết theo ' + p.name);
+    renderView();
+  };
+  if(wxGo && wxIn){
+    const search = async ()=>{
+      const q = wxIn.value.trim();
+      if(!q){ wxOut.textContent = 'Nhập tên thành phố trước.'; return; }
+      wxGo.disabled = true; wxOut.textContent = 'Đang tìm…';
+      try{
+        const list = await weatherSearchPlace(q);
+        if(!list.length){ wxOut.textContent = 'Không tìm thấy nơi nào tên như vậy.'; return; }
+        // Offer the matches rather than guessing: "Huế" and "Hue" are not the
+        // same place, and picking silently is how you end up with the weather
+        // of somewhere you have never been.
+        wxOut.innerHTML = '';
+        list.forEach(p=>{
+          const b = document.createElement('button');
+          b.className = 'btn btn-ghost btn-sm';
+          b.style.cssText = 'margin:0 6px 6px 0;';
+          b.textContent = p.name;
+          b.onclick = ()=> useIt(p);
+          wxOut.appendChild(b);
+        });
+      }catch(e){
+        wxOut.textContent = 'Không tìm được (' + (e.message||'lỗi mạng') + ').';
+      }finally{ wxGo.disabled = false; }
+    };
+    wxGo.onclick = search;
+    wxIn.onkeydown = (e)=>{ if(e.key === 'Enter'){ e.preventDefault(); search(); } };
+  }
+  const wxClr = document.getElementById('wxClearPlace');
+  if(wxClr) wxClr.onclick = ()=>{
+    delete STATE.settings.weatherPlace;
+    persist(); WEATHER.at = 0; refreshWeather(); renderView();
+    toast('Đã bỏ thành phố — dùng lại vị trí trình duyệt');
+  };
   document.querySelectorAll('[data-sound-set]').forEach(el=> el.onclick = ()=>{
     STATE.settings.sound = el.dataset.soundSet === '1';
     persist(); renderView();
@@ -11489,18 +11602,29 @@ const TobbyRig = {
   /** Expression, independent of whatever the body is doing. Five eye shapes
    *  by five mouth shapes is twenty-five faces, none of which needs its own
    *  animation clip. */
+  wantEye:'open', wantMouth:'smile', blinkUntil:0,
   setFace(eye, mouth){
     if(!this.ready) return false;
-    const one = (group, want)=>{
-      if(!group[want]) return false;
-      for(const [k, nodes] of Object.entries(group)) nodes.forEach(n=> n.scale.setScalar(k===want ? 1 : 0));
-      return true;
-    };
-    let ok = true;
-    if(eye)   ok = one(this.face.eye, eye)     && ok;
-    if(mouth) ok = one(this.face.mouth, mouth) && ok;
-    return ok;
+    if(eye)   this.wantEye = eye;
+    if(mouth) this.wantMouth = mouth;
+    this.applyFace();
+    return !!(this.face.eye[this.wantEye] && this.face.mouth[this.wantMouth]);
   },
+  /** Write the chosen face onto the rig. Called every frame after the mixer,
+   *  because the clips animate these same scales and would otherwise win. */
+  applyFace(){
+    if(!this.ready) return;
+    const eye = performance.now() < this.blinkUntil ? 'closed' : this.wantEye;
+    const one = (group, want)=>{
+      if(!group[want]) return;
+      for(const [k, nodes] of Object.entries(group)) nodes.forEach(n=> n.scale.setScalar(k===want ? 1 : 0));
+    };
+    one(this.face.eye, eye);
+    one(this.face.mouth, this.wantMouth);
+  },
+  /** A blink is now a hundred milliseconds of closed eyes, not a whole clip —
+   *  the clip version cannot survive the face being re-asserted each frame. */
+  blink(ms){ this.blinkUntil = performance.now() + (ms || 120); },
 
   resize(){
     if(!this.renderer || !this.container) return;
@@ -11582,15 +11706,33 @@ const TobbyAnim = {
     this.actionAction = null;
   },
 
-  /** Additive, and deliberately weak: a glance must never be able to cancel a
-   *  meal or a walk. */
+  /** Genuinely additive — not merely weak.
+   *
+   *  Blending an overlay at partial weight does not layer it, it AVERAGES it
+   *  with the base, and every clip in this rig keys every prop. A blink at
+   *  weight 0.5 therefore dragged prop_workstation halfway back to zero and
+   *  left the desk hovering at half scale during Working. Making the clip
+   *  additive turns it into a delta on top of whatever the base is doing,
+   *  which is what an overlay was always supposed to be. */
+  _additive:{},
   playOverlay(name, weight){
     if(!TobbyRig.ready || !this._clip(name)) return false;
-    const a = this._act(name);
+    const T = TobbyRig.THREE;
+    let clip = this._additive[name];
+    if(!clip){
+      clip = this._clip(name).clone();
+      T.AnimationUtils.makeClipAdditive(clip);
+      clip.name = name + '__additive';
+      this._additive[name] = clip;
+    }
+    const a = TobbyRig.mixer.clipAction(clip);
+    a.blendMode = T.AdditiveAnimationBlendMode;
+    a.setLoop(T.LoopOnce, 1);
+    a.clampWhenFinished = false;
     a.reset();
     a.setEffectiveWeight(weight == null ? 0.6 : weight);
     a.play();
-    this.overlays.push({ a, until: performance.now() + this._clip(name).duration*1000 });
+    this.overlays.push({ a, until: performance.now() + clip.duration*1000 });
     return true;
   },
 
@@ -11599,6 +11741,12 @@ const TobbyAnim = {
     const dt = Math.min(0.1, (now - (this.last||now))/1000);
     this.last = now;
     TobbyRig.mixer.update(dt);
+    // AFTER the mixer, every frame. The clips key eyevar/mouthvar scale
+    // themselves, so a face set once is overwritten on the next update — which
+    // is why the chosen expression silently vanished the moment any clip with
+    // face keys took over. Re-asserting here is what makes the face genuinely
+    // independent of what the body is doing.
+    TobbyRig.applyFace();
     if(this.actionName && now >= this.actionUntil) this.endAction();
     this.overlays = this.overlays.filter(o=>{
       if(now < o.until) return true;
@@ -11610,10 +11758,238 @@ const TobbyAnim = {
 
   start(){
     if(this.raf) return;
-    const loop = (ts)=>{ this.raf = requestAnimationFrame(loop); this.update(ts); };
+    const loop = (ts)=>{
+      this.raf = requestAnimationFrame(loop);
+      this.update(ts);
+      try{ TobbyBrain.tick(ts); }catch(e){}
+    };
     this.raf = requestAnimationFrame(loop);
   },
   stop(){ if(this.raf) cancelAnimationFrame(this.raf); this.raf = 0; },
+};
+/* ---------------------------------------------------------
+   What he does, and why.
+
+   Every clip in the file is reachable from here. They are grouped the way the
+   rig groups them, and each group talks to exactly one layer:
+
+     CORE          base + overlay   how he is when nothing is happening
+     MOVEMENT      base             going somewhere
+     LIFE          base + action    sleeping, waking, stretching, playing
+     PRODUCTIVITY  base + action    reacting to the board
+     CELEBRATION   action           finishing something
+
+   Emotion is a FACE, not a clip. That separation is the point: the old build
+   spent a whole animation slot on 'worried', so he could not be worried while
+   walking. Here the face is set independently and every combination is free.
+   --------------------------------------------------------- */
+const TB_FACE = {
+  idle:      ['open',   'smile'],
+  happy:     ['wide',   'smile'],
+  excited:   ['wide',   'open' ],
+  curious:   ['wide',   'flat' ],
+  thinking:  ['half',   'flat' ],
+  worried:   ['half',   'frown'],
+  sad:       ['half',   'frown'],
+  sleepy:    ['half',   'flat' ],
+  sleeping:  ['closed', 'flat' ],
+  surprised: ['wide',   'open' ],
+  angry:     ['squint', 'frown'],
+  proud:     ['squint', 'smile'],
+  focused:   ['squint', 'flat' ],
+  working:   ['open',   'flat' ],
+  yawning:   ['closed', 'yawn' ],
+};
+/** Emotion -> the looping posture that carries it. */
+const TB_MOOD_BASE = {
+  idle:'Tobby_Idle', happy:'Tobby_Happy', excited:'Tobby_Excited',
+  curious:'Tobby_Curious', thinking:'Tobby_Thinking', worried:'Tobby_Worried',
+  sad:'Tobby_Sad', sleepy:'Tobby_Sleepy', sleeping:'Tobby_Sleep',
+  angry:'Tobby_Angry', proud:'Tobby_Proud', focused:'Tobby_Focused',
+  working:'Tobby_Working',
+};
+/** Ambient overlays — small signs of life, none of which may interrupt
+ *  anything. Weighted so a blink during a meal reads as a blink and not as a
+ *  glitch. */
+const TB_AMBIENT = [
+  { blink:true,              every:[3200, 7000] },
+  { clip:'Tobby_LookAround', weight:0.6, every:[14000, 34000] },
+  { clip:'Tobby_Breathe',    weight:0.4, every:[9000, 20000] },
+];
+
+/** Postures that are a JOB, not a feeling. A mood may not replace one of
+ *  these — he can be worried while walking, but "worried" must not stop the
+ *  walk. Everything outside this set is fair game for a mood to occupy. */
+const TB_POSTURE = new Set([
+  'Tobby_Walk','Tobby_Run','Tobby_Sleep','Tobby_Working','Tobby_Focused','Tobby_Sit',
+]);
+
+const TobbyBrain = {
+  mood:'idle', moodUntil:0, ambientAt:{}, sleeping:false, x:null,
+
+  /* ---------- CORE ---------- */
+  /** Set how he feels. The face applies immediately and always; the posture
+   *  only if nothing more important is running — which is why a worried face
+   *  can arrive mid-walk without stopping the walk. */
+  feel(mood, ms){
+    if(!TobbyRig.ready) return false;
+    const f = TB_FACE[mood] || TB_FACE.idle;
+    TobbyRig.setFace(f[0], f[1]);
+    this.mood = mood;
+    // 0 means "hold until something else changes it". Writing `now + 0` made
+    // every mood expire on the very next frame, which quietly undid the face
+    // a few milliseconds after setting it.
+    this.moodUntil = ms ? performance.now() + ms : 0;
+    // The posture follows the mood ONLY when he is not otherwise occupied.
+    // Walking, running, sleeping and working are things he is doing; being
+    // worried is a way of doing them, not an alternative to them. Overriding
+    // here is what made "worried" stop a walk — and the whole reason the face
+    // was separated from the clips in the first place.
+    const base = TB_MOOD_BASE[mood];
+    const busy = TobbyAnim.actionName || this.moving || this.sleeping ||
+                 TB_POSTURE.has(TobbyAnim.baseName);
+    if(base && !busy) TobbyAnim.setBase(base);
+    return true;
+  },
+  /** Back to whatever he would be feeling anyway, given the board. */
+  relax(){
+    if(this.sleeping) return this.feel('sleeping');
+    this.feel(this.restingMood());
+  },
+  /** His resting face is the board's mood, not a random one. */
+  restingMood(){
+    try{
+      const open = activeTasks().filter(t=> t.status!=='Hoàn thành' && !isFrozen(t));
+      if(open.some(t=> isOverdue(t))) return 'worried';
+      if(open.filter(t=> isSameDay(t.deadline)).length >= 3) return 'thinking';
+    }catch(e){}
+    return 'idle';
+  },
+  /** He looks where you are, but only while you are near him. */
+  glanceAt(clientX){
+    if(!TobbyRig.ready || this.sleeping || TobbyAnim.actionName) return;
+    TobbyAnim.playOverlay('Tobby_LookAtUser', 0.55);
+  },
+
+  /* ---------- MOVEMENT ---------- */
+  moving:false,
+  /** Walk or run to a point on the bottom edge. Gait follows distance the way
+   *  it would for a real animal: a few steps is a walk, across the room is a
+   *  run. */
+  goTo(x, done){
+    const dock = document.getElementById('tobbyDock');
+    if(!dock || !TobbyRig.ready) return false;
+    const w = dock.offsetWidth || 76;
+    const to = Math.max(6, Math.min(innerWidth - w - 6, x - w/2));
+    const from = parseFloat(dock.style.left) || 0;
+    const dist = Math.abs(to - from);
+    if(dist < 8){ if(done) done(); return true; }
+    const run = dist > 320;
+    const secs = run ? Math.min(1.6, 0.5 + dist/700) : Math.min(2.0, 0.5 + dist/260);
+    this.moving = true;
+    this.face(to < from ? -1 : 1);
+    TobbyAnim.setBase(run ? 'Tobby_Run' : 'Tobby_Walk');
+    dock.style.transition = 'left ' + secs + 's cubic-bezier(.33,.02,.35,1)';
+    dock.style.left = to + 'px';
+    clearTimeout(this._moveTimer);
+    this._moveTimer = setTimeout(()=>{
+      dock.style.transition = '';
+      this.moving = false;
+      this.x = to;
+      this.faceForward();
+      this.relax();
+      this.savePlace();
+      if(done) done();
+    }, secs*1000 + 40);
+    return true;
+  },
+  /** Turn the body in the scene rather than mirroring the element: flipping
+   *  the element would flip his lighting with him and put the key light on
+   *  the wrong side. */
+  face(dir){
+    if(!TobbyRig.ready) return;
+    const dock = document.getElementById('tobbyDock');
+    if(dock) dock.dataset.facing = dir < 0 ? 'left' : 'right';
+    TobbyRig.root.rotation.y = dir < 0 ? -Math.PI/2 : Math.PI/2;
+  },
+  faceForward(){ if(TobbyRig.ready) TobbyRig.root.rotation.y = 0; },
+  hop(){ TobbyAnim.playAction('Tobby_Jump'); },
+
+  /* ---------- LIFE ---------- */
+  sleep(){
+    if(this.sleeping) return;
+    this.sleeping = true;
+    this.feel('sleepy', 1200);
+    setTimeout(()=>{ if(this.sleeping){ TobbyAnim.setBase('Tobby_Sleep'); this.feel('sleeping'); } }, 1200);
+  },
+  wake(){
+    if(!this.sleeping) return;
+    this.sleeping = false;
+    TobbyAnim.playAction('Tobby_WakeUp');
+    setTimeout(()=> this.relax(), 2400);
+  },
+  yawn(){    this.feel('yawning', 1400); TobbyAnim.playAction('Tobby_Yawn'); },
+  stretch(){ TobbyAnim.playAction('Tobby_Stretch'); },
+  play(){    this.feel('excited', 1400); TobbyAnim.playAction('Tobby_Play'); },
+
+  /* ---------- PRODUCTIVITY ---------- */
+  /** The desk is not managed here on purpose: prop_workstation is scale-keyed
+   *  to 1 inside Working/Typing/Focused and to 0 everywhere else, so choosing
+   *  the clip IS showing the desk. Anything this code did to the prop would be
+   *  fighting the rig. */
+  work(kind){
+    if(kind === 'typing'){ this.feel('working'); TobbyAnim.playAction('Tobby_Typing', 1400); return; }
+    if(kind === 'focused'){ this.feel('focused'); TobbyAnim.setBase('Tobby_Focused'); return; }
+    this.feel('working'); TobbyAnim.setBase('Tobby_Working');
+  },
+  taskDone(){ this.feel('happy', 2000); TobbyAnim.playAction('Tobby_TaskCompleted'); },
+  notice(urgent){
+    if(this.sleeping) this.wake();
+    if(urgent){ this.feel('surprised', 1800); TobbyAnim.playAction('Tobby_UrgentNotification'); }
+    else TobbyAnim.playOverlay('Tobby_LookAtNotification', 0.7);
+  },
+
+  /* ---------- CELEBRATION ---------- */
+  celebrate(){ this.feel('excited', 2400); TobbyAnim.playAction('Tobby_Celebrate'); },
+  levelUp(){   this.feel('proud', 3000);   TobbyAnim.playAction('Tobby_LevelUp'); },
+  evolve(){    this.feel('proud', 4200);   TobbyAnim.playAction('Tobby_Evolution'); },
+  beProud(){   this.feel('proud', 2400);   TobbyAnim.setBase('Tobby_Proud'); },
+
+  /** Where he was standing last time. Saved on arrival so a reload does not
+   *  teleport him back to the corner. */
+  restorePlace(){
+    const dock = document.getElementById('tobbyDock');
+    if(!dock) return;
+    const w = dock.offsetWidth || 76;
+    const saved = (STATE.tobby && typeof STATE.tobby.x === 'number') ? STATE.tobby.x : null;
+    const x = saved == null ? innerWidth - w - 24 : saved;
+    dock.style.left = Math.max(6, Math.min(x, innerWidth - w - 6)) + 'px';
+    this.x = parseFloat(dock.style.left);
+  },
+  savePlace(){
+    if(!STATE.tobby) STATE.tobby = {};
+    STATE.tobby.x = this.x;
+    persist();
+  },
+
+  /* ---------- the ambient tick ---------- */
+  /** Small signs of life on their own timers. Overlays only, so this can run
+   *  during a meal or a walk without ever being the thing that breaks it. */
+  tick(now){
+    if(!TobbyRig.ready || document.hidden) return;
+    if(this.moodUntil && now > this.moodUntil){ this.moodUntil = 0; this.relax(); }
+    if(this.sleeping || this.moving) return;
+    for(const a of TB_AMBIENT){
+      const id = a.clip || 'blink';
+      const next = this.ambientAt[id] || (this.ambientAt[id] = now + a.every[0]);
+      if(now < next) continue;
+      this.ambientAt[id] = now + a.every[0] + Math.random()*(a.every[1]-a.every[0]);
+      // Blinking is allowed even mid-action — a dog that stops blinking to eat
+      // looks stuffed. Everything else waits its turn.
+      if(a.blink){ TobbyRig.blink(); continue; }
+      if(!TobbyAnim.actionName) TobbyAnim.playOverlay(a.clip, a.weight);
+    }
+  },
 };
 /** Put him in the DOM and keep him there.
  *
@@ -11633,6 +12009,8 @@ function wireTobbyStage(){
       TobbyRig.resize();
       TobbyRig.render();
     }
+    wireTobbyInteraction();
+    TobbyBrain.restorePlace();
     return;
   }
   if(TobbyRig.loading || TobbyRig.failed) return;
@@ -11640,7 +12018,65 @@ function wireTobbyStage(){
     if(!ok) return;
     TobbyAnim.setBase('Tobby_Idle');
     TobbyAnim.start();
+    TobbyBrain.relax();
+    TobbyBrain.restorePlace();
+    wireTobbyInteraction();
   });
+}
+/** Interactions. Bound once and removed first: wireTobbyStage runs on every
+ *  render, and a document-level handler added each time is a leak that only
+ *  shows up an hour in. */
+let tbDocDbl = null, tbDocMove = null, tbOnResizeTobby = null;
+function wireTobbyInteraction(){
+  const dock = document.getElementById('tobbyDock');
+  const body = document.getElementById('tobbyBody');
+  if(!dock || !body) return;
+
+  // Double-click anywhere else: he comes to you.
+  if(tbDocDbl) document.removeEventListener('dblclick', tbDocDbl);
+  tbDocDbl = (e)=>{
+    if(!TobbyRig.ready) return;
+    if(e.target.closest('#tobbyDock, .modal, .overlay, .tb-panel')) return;
+    // Double-click is also "select this word" and "open this row". Anywhere the
+    // user is reading, typing or operating a control, that meaning wins.
+    if(e.target.closest('input, textarea, select, button, a, [contenteditable], [data-open], .data-table, .note-card')) return;
+    if(window.getSelection && String(window.getSelection()).length) return;
+    if(TobbyBrain.sleeping) TobbyBrain.wake();
+    TobbyBrain.goTo(e.clientX, ()=> TobbyBrain.hop());
+  };
+  document.addEventListener('dblclick', tbDocDbl);
+
+  // His head follows the pointer while it is near him — the one continuous
+  // piece of feedback that makes him feel present rather than parked.
+  if(tbDocMove) document.removeEventListener('pointermove', tbDocMove);
+  let lastGlance = 0;
+  tbDocMove = (e)=>{
+    if(!TobbyRig.ready || TobbyBrain.sleeping) return;
+    const r = dock.getBoundingClientRect();
+    if(Math.abs(e.clientY - r.top) > 260 || Math.abs(e.clientX - (r.left+r.width/2)) > 320) return;
+    const now = performance.now();
+    if(now - lastGlance < 5000) return;
+    lastGlance = now;
+    TobbyBrain.glanceAt(e.clientX);
+  };
+  document.addEventListener('pointermove', tbDocMove, { passive:true });
+
+  // Knocking wakes him; otherwise a tap is a hello.
+  body.onclick = (e)=>{
+    e.stopPropagation();
+    if(!TobbyRig.ready) return;
+    if(TobbyBrain.sleeping){ TobbyBrain.wake(); return; }
+    TobbyBrain.play();
+  };
+
+  removeEventListener('resize', tbOnResizeTobby);
+  tbOnResizeTobby = ()=>{
+    if(!TobbyRig.ready) return;
+    TobbyRig.resize();
+    const w = dock.offsetWidth || 76;
+    dock.style.left = Math.max(6, Math.min(parseFloat(dock.style.left)||0, innerWidth - w - 6)) + 'px';
+  };
+  addEventListener('resize', tbOnResizeTobby, { passive:true });
 }
 
 /* ---------- boot ---------- */
