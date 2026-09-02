@@ -11972,7 +11972,25 @@ const TobbyRig = {
     // of him and close to the camera, so it projects far larger than its size
     // suggests, and the sphere called it framed while it was a frame and a half
     // off to the left. So fit, then correct ONCE against the real corners.
-    let d = Math.max(radius/Math.sin(vr), radius/Math.sin(hr)) * TB_FRAME_FIT;
+    /* Fit to the size he will EVENTUALLY be, not the size he is now.
+       Fitting each stage to the frame made the camera undo the growth as fast
+       as it happened: a puppy was pulled in close and an adult pushed back, so
+       all five stages filled the dock identically and the only visible
+       difference between a newborn and a grown dog was the shape of his ears.
+       Holding the distance at the last stage's reach means a puppy really is
+       small in his corner and really does grow into it.
+
+       The bowl is the exception and is allowed to push further out: it stands
+       in front of him, close to the camera, and would otherwise hang off the
+       side of the frame. It never pulls the camera IN. */
+    const stageMax = (typeof TOBBY_STAGES !== 'undefined')
+      ? TOBBY_STAGES.reduce((m,x)=> Math.max(m, x.size), 0) : 0;
+    let fitRadius = radius;
+    if(this._restBox && stageMax){
+      const rest = new T.Box3(this._restBox.min.clone(), this._restBox.max.clone());
+      fitRadius = Math.max(radius, rest.getSize(new T.Vector3()).length() * 0.5 * stageMax);
+    }
+    let d = Math.max(fitRadius/Math.sin(vr), fitRadius/Math.sin(hr)) * TB_FRAME_FIT;
     let worst = settle(d);
     if(worst > TB_FRAME_MAX){ d = d * worst / TB_FRAME_MAX; settle(d); }
 
@@ -12468,12 +12486,29 @@ function tobby(){
    it a puppy is just a small adult, and the whole point of a stage is that the
    PROPORTIONS change. Short legs and a big head read as young; the same dog
    scaled down does not. */
+/* YOUNG IS THE BASELINE, not the adult. The rig's own extras say
+   growthStage: "Young", and the stage sheet calls Young "bản hiện tại" — the
+   model as authored IS the middle stage. Everything is expressed relative to
+   it: the two below are smaller, the two above are larger. Building the table
+   the other way round, with the adult at 1.0, made every stage a shrunken
+   version of a dog that never existed.
+
+   The sheet also gives each stage its defining trait, and they are not all the
+   same knob: Teen is "tai dài, to" and Adult is "to, lông xù". So the ears are
+   two knobs, as the rig says (earW/earL) — measured, the ear hangs 0.22 along
+   Y and is 0.05 x 0.12 across, so LENGTH is Y and WIDTH is X and Z. A teen
+   gets longer ears, not merely bigger ones; an adult gets the coat. */
 const TOBBY_STAGES = [
-  { key:'tiny',  rig:'Puppy', vi:'Cún sơ sinh',            en:'Tiny Puppy',  xp:0,    size:0.70, leg:0.74, head:1.32, ear:1.20, floof:0    },
-  { key:'baby',  rig:'Baby',  vi:'Cún nhỏ',                en:'Puppy',       xp:150,  size:0.79, leg:0.83, head:1.21, ear:1.13, floof:0.15 },
-  { key:'young', rig:'Young', vi:'Cún lớn',                en:'Young Tobby', xp:600,  size:0.88, leg:0.91, head:1.12, ear:1.07, floof:0.45 },
-  { key:'teen',  rig:'Teen',  vi:'Tobby thiếu niên',       en:'Teen Tobby',  xp:1800, size:0.95, leg:0.97, head:1.05, ear:1.03, floof:0.75 },
-  { key:'adult', rig:'Adult', vi:'Tobby trưởng thành', en:'Adult Tobby', xp:4000, size:1.00, leg:1.00, head:1.00, ear:1.00, floof:1 },
+  { key:'tiny',  rig:'Puppy', vi:'Cún sơ sinh',        en:'Tiny Puppy',  xp:0,
+    size:0.62, leg:0.72, head:1.30, earW:1.00, earL:0.80, floof:0    },
+  { key:'baby',  rig:'Baby',  vi:'Cún nhỏ',            en:'Puppy',       xp:150,
+    size:0.78, leg:0.85, head:1.16, earW:1.00, earL:0.88, floof:0.15 },
+  { key:'young', rig:'Young', vi:'Cún lớn',            en:'Young Tobby', xp:600,
+    size:1.00, leg:1.00, head:1.00, earW:1.00, earL:1.00, floof:0.45 },
+  { key:'teen',  rig:'Teen',  vi:'Tobby thiếu niên',   en:'Teen Tobby',  xp:1800,
+    size:1.10, leg:1.06, head:0.97, earW:1.05, earL:1.40, floof:0.70 },
+  { key:'adult', rig:'Adult', vi:'Tobby trưởng thành', en:'Adult Tobby', xp:4000,
+    size:1.20, leg:1.10, head:0.95, earW:1.10, earL:1.30, floof:1.00 },
 ];
 const TOBBY_DAY_MS = 86400000;
 const TobbyGrowth = {
@@ -12510,17 +12545,36 @@ const TobbyGrowth = {
     const s = this.current();
     TobbyRig.root.scale.setScalar(s.size);
     const head = TobbyRig.bones.head;   if(head) head.scale.setScalar(s.head);
-    ['earL','earR'].forEach(n=>{ const e = TobbyRig.bones[n]; if(e) e.scale.setScalar(s.ear); });
+    // Ears are two knobs, as the rig names them. Length runs down Y; width is
+    // the other two. A teen's ears get long, not just large.
+    ['earL','earR'].forEach(n=>{
+      const e = TobbyRig.bones[n];
+      if(e) e.scale.set(s.earW, s.earL, s.earW);
+    });
     // The leg chain, on the vertical axis only: shortening the legs is what
     // makes a puppy read as a puppy rather than as a shrunken adult.
-    ['thighL','thighR','shinL','shinR'].forEach(n=>{
+    //
+    // Only the hips are scaled, which is what the rig means by "hip bones
+    // y-scale". The shins hang UNDER the thighs, so scaling both multiplied the
+    // knob by itself: a puppy asked for 0.72 stood on 0.51 legs and an adult
+    // asked for 1.10 got 1.37. The shins inherit the hip's scale and now land
+    // on exactly what the table says.
+    ['thighL','thighR'].forEach(n=>{
       const b = TobbyRig.bones[n];
       if(b) b.scale.set(1, s.leg, 1);
+    });
+    ['shinL','shinR'].forEach(n=>{
+      const b = TobbyRig.bones[n];
+      if(b) b.scale.set(1, 1, 1);
     });
     // The extra coat only fills in once he is grown.
     TobbyRig.floof.forEach(g=> g.scale.setScalar(s.floof));
     tobby().stage = s.key;
-    TobbyRig.frame();          // he is a different size now; re-aim at him
+    // A stage changes his SHAPE, not only his size — longer ears, shorter legs,
+    // a thicker coat — so the cached silhouette no longer describes him and the
+    // camera would frame the previous stage's outline.
+    TobbyRig._restBox = null;
+    TobbyRig.frame();
     return true;
   },
   /** Called on the clock. An actual change of stage is an event worth seeing. */
