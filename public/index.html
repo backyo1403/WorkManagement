@@ -11589,7 +11589,11 @@ const TB_VIEW_DIR = [0.30, 0.42, 1.00];
    corners of his box, which are never his widest part on screen, so fitting it
    exactly leaves him using barely half a 76px viewport. Backing off fills about
    three quarters of it with margin still to spare. */
-const TB_FRAME_FIT = 0.86;
+const TB_FRAME_FIT = 0.86;      // a sphere circumscribes corners; this trims it
+const TB_FRAME_MAX = 0.99;      // how far out the furthest corner may sit
+/* Where his paws land, in normalised device coordinates. Not quite -1: a few
+   pixels of air stop him looking sawn off at the edge of his own canvas. */
+const TB_FEET_NDC = -0.94;
 
 const TobbyRig = {
   ready:false, failed:false, loading:false,
@@ -11754,12 +11758,56 @@ const TobbyRig = {
    *  whole scene put the framing 0.68 units deep instead of his own 0.40 and
    *  pushed him two frustums wide. Box3.setFromObject does not skip invisible
    *  children either, so hiding the bowl is not enough. */
-  bodyBox(){
+  /** His silhouette, measured ONCE and held.
+   *
+   *  Framing from the live pose meant the camera depended on which frame of
+   *  which clip happened to be showing when it was computed — reframing just
+   *  after a meal, while he was still uncurling from the crouch, aimed at the
+   *  crouch and left a dozen blank rows under him once he stood up. The shape
+   *  is cached in model units and rescaled with the growth stage, so the camera
+   *  is steady and a stage change still re-aims correctly. */
+  frameBox(){
+    const T = this.THREE;
+    const s = this.root.scale.x || 1;
+    if(!this._restBox){
+      const b = this.bodyBox(true);          // ignore the bowl for the cache
+      if(b.isEmpty()) return b;
+      this._restBox = { min:b.min.clone().divideScalar(s), max:b.max.clone().divideScalar(s) };
+    }
+    const box = new T.Box3(this._restBox.min.clone().multiplyScalar(s),
+                           this._restBox.max.clone().multiplyScalar(s));
+    // The bowl counts only while it is out, and it moves with the clips, so it
+    // is measured live rather than cached.
+    if(this.bowl.root && this.bowl.root.visible){
+      this.root.updateMatrixWorld(true);
+      box.union(new T.Box3().setFromObject(this.bowl.root));
+    }
+    return box;
+  },
+
+  bodyBox(dogOnly){
     const T = this.THREE, box = new T.Box3();
-    const isProp = o=>{ let p=o; while(p){ if(p.name==='bowl_root' || p.name==='prop_workstation') return true; p=p.parent; } return false; };
+    // The bowl counts WHEN IT IS OUT. It stands on the floor in front of him,
+    // so framing him alone put it entirely below the bottom of the frame —
+    // NDC -2.08 to -1.01, not a pixel of it on screen. He played the eating
+    // clip into thin air, which is exactly what "the eat rig doesn't work"
+    // looks like from outside.
+    //
+    // prop_workstation deliberately does not count: it is scale-keyed by the
+    // clips themselves, so including it would jog the camera on every change
+    // between working and not.
+    const skip = o=>{
+      let p = o;
+      while(p){
+        if(p.name === 'prop_workstation') return true;
+        if(p.name === 'bowl_root') return dogOnly ? true : !p.visible;
+        p = p.parent;
+      }
+      return false;
+    };
     this.root.updateMatrixWorld(true);
     this.root.traverse(o=>{
-      if(!o.isMesh || !o.geometry || !o.visible || isProp(o)) return;
+      if(!o.isMesh || !o.geometry || !o.visible || skip(o)) return;
       o.geometry.computeBoundingBox();
       box.union(o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld));
     });
@@ -11777,18 +11825,102 @@ const TobbyRig = {
   frame(){
     if(!this.ready && !this.camera) return;
     const T = this.THREE;
-    const box = this.bodyBox();
+    const box = this.frameBox();
     if(box.isEmpty()) return;
     const centre = box.getCenter(new T.Vector3());
     const radius = box.getSize(new T.Vector3()).length() * 0.5;
     const a = this.camera.aspect || 1;
     const vr = (this.camera.fov * Math.PI/180) / 2;
     const hr = Math.atan(Math.tan(vr) * a);
-    const d = Math.max(radius/Math.sin(vr), radius/Math.sin(hr)) * TB_FRAME_FIT;
     const dir = new T.Vector3(TB_VIEW_DIR[0], TB_VIEW_DIR[1], TB_VIEW_DIR[2]).normalize();
-    this.camera.position.copy(centre).add(dir.multiplyScalar(d));
-    this.camera.lookAt(centre);
-    this.camera.updateProjectionMatrix();
+    const cx = (box.min.x + box.max.x) / 2, cz = (box.min.z + box.max.z) / 2;
+    const corners = [];
+    for(const x of [box.min.x, box.max.x])
+      for(const y of [box.min.y, box.max.y])
+        for(const z of [box.min.z, box.max.z]) corners.push(new T.Vector3(x,y,z));
+
+    // Two things have to be true at once: his paws sit ON the bottom of the
+    // frame, and nothing sticks out of it. Neither has a closed form worth
+    // deriving, so both are measured — but they must not be allowed to chase
+    // each other. `shift` is absolute, re-derived from the box centre on every
+    // pass rather than accumulated, and clamped: letting it drift while the
+    // distance was also changing sent the camera off into the far distance,
+    // still satisfying the feet rule perfectly with a dog one pixel across.
+    //
+    // A bounding-sphere fit alone is not enough either. When the bowl is out it
+    // stands well in front of him and close to the camera, so it projects far
+    // larger than its size suggests — the sphere called it framed while it was
+    // a frame and a half off to the left.
+    const aim = (d, shift)=>{
+      const target = centre.clone(); target.y += shift;
+      this.camera.position.copy(target).add(dir.clone().multiplyScalar(d));
+      this.camera.lookAt(target);
+      this.camera.updateMatrixWorld(true);
+      this.camera.updateProjectionMatrix();
+    };
+    /* Bias the aim so the floor line lands where we want it, at a FIXED
+       distance. Distance is held still on purpose: the world shift needed for
+       a given pixel shift scales with distance, so letting the two adjust each
+       other is a positive feedback loop — it walked the camera out to three
+       units from a dog less than half a unit tall, still satisfying the feet
+       rule perfectly with nothing visible. */
+    /* "Feet" means the LOWEST THING ON SCREEN, not the middle of his underside.
+       Those are not the same point: the near-bottom corner of his box projects
+       noticeably lower than its centre under a three-quarter view, so aiming by
+       the centre always left something below the line — and the fit correction
+       then doubled the camera distance trying to pull it back in. Driving the
+       lowest projected corner means the two rules agree instead of fighting. */
+    const lowest = ()=>{
+      let lo = Infinity;
+      for(const c of corners) lo = Math.min(lo, c.clone().project(this.camera).y);
+      return lo;
+    };
+    const settle = (d)=>{
+      let shift = 0;
+      for(let i = 0; i < 5; i++){
+        aim(d, shift);
+        const err = lowest() - TB_FEET_NDC;
+        if(Math.abs(err) < 0.004) break;
+        shift += err * d * Math.tan(vr);
+      }
+      this._shift = shift;              // the pixel pass below refines this
+      let worst = 0;
+      for(const c of corners){
+        const p = c.clone().project(this.camera);
+        worst = Math.max(worst, Math.abs(p.x), Math.abs(p.y));
+      }
+      return worst;
+    };
+
+    // A sphere fit alone is not enough when the bowl is out: it stands in front
+    // of him and close to the camera, so it projects far larger than its size
+    // suggests, and the sphere called it framed while it was a frame and a half
+    // off to the left. So fit, then correct ONCE against the real corners.
+    let d = Math.max(radius/Math.sin(vr), radius/Math.sin(hr)) * TB_FRAME_FIT;
+    let worst = settle(d);
+    if(worst > TB_FRAME_MAX){ d = d * worst / TB_FRAME_MAX; settle(d); }
+
+    /* Last, put the lowest PIXEL on the line rather than the lowest corner of
+       his bounding box. A box is a cuboid and he is a dog: its bottom corners
+       are empty air beside his paws, so aiming by them still left a dozen blank
+       rows under him in an 88px viewport — which is exactly the gap that reads
+       as "his feet are missing". One readback settles it exactly, and this runs
+       only when he changes size or the bowl comes out, not per frame. */
+    if(this.renderer && this.container){
+      this.renderer.render(this.scene, this.camera);
+      const c = this.renderer.domElement, gl = this.renderer.getContext();
+      const px = new Uint8Array(c.width * c.height * 4);
+      gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      let lowRow = -1;
+      for(let r = 0; r < c.height && lowRow < 0; r++)
+        for(let col = 0; col < c.width; col++)
+          if(px[(r*c.width + col)*4 + 3] > 16){ lowRow = r; break; }
+      if(lowRow > 0){
+        const ndcY = (lowRow + 0.5) / c.height * 2 - 1;   // row 0 is the bottom
+        const err = ndcY - TB_FEET_NDC;
+        if(Math.abs(err) > 0.004) aim(d, this._shift + err * d * Math.tan(vr));
+      }
+    }
   },
 
   resize(){
@@ -12389,7 +12521,14 @@ const TobbyBowl = {
     return this.fit;
   },
 
-  show(on){ if(TobbyRig.ready) TobbyRig.bowl.root.visible = !!on; },
+  /** Showing or hiding the bowl changes what has to be in shot, so the camera
+   *  is re-aimed. It reads as a small pull-back when dinner arrives. */
+  show(on){
+    if(!TobbyRig.ready) return;
+    const was = TobbyRig.bowl.root.visible;
+    TobbyRig.bowl.root.visible = !!on;
+    if(was !== !!on) TobbyRig.frame();
+  },
   visible(){ return TobbyRig.ready && TobbyRig.bowl.root.visible; },
 
   /** Voxel clusters, in the bowl's own idiom. Layers are
