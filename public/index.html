@@ -11585,6 +11585,7 @@ const TOBBY_GLB_URL = 'assets/tobby/Tobby_Animated.glb';
    that he looks away. Distance is computed from his measured size, not fixed,
    because a growth stage changes how big he is. */
 const TB_VIEW_DIR = [0.30, 0.42, 1.00];
+const TB_CORNER_PAD = 14;       // how far his corner sits from the window edge
 /* Distance multiplier on the bounding-sphere fit. The sphere circumscribes the
    corners of his box, which are never his widest part on screen, so fitting it
    exactly leaves him using barely half a 76px viewport. Backing off fills about
@@ -12196,7 +12197,6 @@ const TobbyBrain = {
       this.x = to;
       this.faceForward();
       this.relax();
-      this.savePlace();
       if(done) done();
     }, secs*1000 + 40);
     return true;
@@ -12255,21 +12255,37 @@ const TobbyBrain = {
 
   /** Where he was standing last time. Saved on arrival so a reload does not
    *  teleport him back to the corner. */
+  /** Put him in his corner and stand him on the floor.
+   *
+   *  Always the bottom-right on open, never a remembered spot. Dragging moves
+   *  him for as long as you are looking at the page and that is the whole of
+   *  what it is for — persisting it meant one afternoon's experiment left him
+   *  parked on the left for good, on a machine whose owner never chose that.
+   *
+   *  The floor is the bottom edge of the main content panel, not the bottom of
+   *  the window: the panel is inset and rounded, so a dog aligned to the window
+   *  hovers above the visible surface, which is precisely the gap by the
+   *  rounded corner. Measured live, because that inset differs between the
+   *  desktop rail and the mobile bar. */
   restorePlace(){
     const dock = document.getElementById('tobbyDock');
     if(!dock) return;
     const w = dock.offsetWidth || 76;
-    const saved = (STATE.tobby && typeof STATE.tobby.x === 'number') ? STATE.tobby.x : null;
-    // Bottom-right by default: the far corner from the navigation, and the one
-    // part of the window nothing else is using.
-    const x = saved == null ? innerWidth - w - 16 : saved;
-    dock.style.left = Math.max(6, Math.min(x, innerWidth - w - 6)) + 'px';
+    dock.style.left = Math.max(6, innerWidth - w - TB_CORNER_PAD) + 'px';
     this.x = parseFloat(dock.style.left);
-  },
-  savePlace(){
-    if(!STATE.tobby) STATE.tobby = {};
-    STATE.tobby.x = this.x;
-    persist();
+    // Older saves carry an x from when the spot was remembered. It is dead
+    // data now and would only confuse the next person reading the state.
+    if(STATE.tobby && STATE.tobby.x != null){ delete STATE.tobby.x; persist(); }
+
+    const main = document.querySelector('.main') || document.getElementById('app');
+    if(main){
+      const floor = main.getBoundingClientRect().bottom;
+      // His lowest pixel sits a hair above the dock's own bottom edge — that is
+      // the air TB_FEET_NDC leaves — so the dock is dropped by exactly that
+      // much to land the paws on the line rather than the box.
+      const inset = (1 + TB_FEET_NDC) / 2 * (dock.offsetHeight || 88);
+      dock.style.bottom = Math.max(0, Math.round(innerHeight - floor - inset)) + 'px';
+    }
   },
 
   /* ---------- the ambient tick ---------- */
@@ -13139,14 +13155,26 @@ function wireTobbyInteraction(){
   let drag = null;
   body.addEventListener('pointerdown', (e)=>{
     if(e.button && e.button !== 0) return;
+    // preventDefault, or the browser starts its own gesture on a button — a
+    // native drag or a text selection — and that cancels the pointer capture,
+    // which fires pointercancel and kills the drag before it moves a pixel.
+    // Synthetic events never trigger that, which is why this worked in every
+    // scripted test and not under a real hand.
+    e.preventDefault();
     // Clear it HERE, not after the click that consumes it. Left set, the flag
     // from one drag swallowed the next plain tap — so the first click after
     // moving him did nothing at all.
     delete dock.dataset.justDragged;
     drag = { x:e.clientX, left:parseFloat(dock.style.left) || dock.getBoundingClientRect().x, moved:false };
     try{ body.setPointerCapture(e.pointerId); }catch(_){}
+    // Belt and braces: if capture is refused for any reason, the pointer
+    // leaving this 76px box would end the drag on the spot. Listening on the
+    // document too means the gesture survives either way.
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', endDrag);
+    document.addEventListener('pointercancel', endDrag);
   });
-  body.addEventListener('pointermove', (e)=>{
+  const onMove = (e)=>{
     if(!drag || !TobbyRig.ready) return;
     const dx = e.clientX - drag.x;
     if(!drag.moved && Math.abs(dx) < 5) return;    // a tap has a little wobble
@@ -13159,23 +13187,27 @@ function wireTobbyInteraction(){
     const w = dock.offsetWidth || 76;
     dock.style.left = Math.max(6, Math.min(innerWidth - w - 6, drag.left + dx)) + 'px';
     TobbyBrain.face(dx < 0 ? -1 : 1);
-  });
+  };
   const endDrag = (e)=>{
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', endDrag);
+    document.removeEventListener('pointercancel', endDrag);
     if(!drag) return;
     const moved = drag.moved;
     drag = null;
     delete dock.dataset.dragging;
-    try{ body.releasePointerCapture(e.pointerId); }catch(_){}
+    try{ if(e && e.pointerId != null) body.releasePointerCapture(e.pointerId); }catch(_){}
     if(!moved) return;                              // a tap; onclick handles it
     dock.dataset.justDragged = '1';                 // the click that follows is not a tap
     TobbyBrain.moving = false;
     TobbyBrain.x = parseFloat(dock.style.left) || 0;
     TobbyBrain.faceForward();
-    TobbyBrain.savePlace();
+    // Stand him up explicitly. relax() will not do it: walking counts as a job
+    // a mood may not take, which is right while he is actually going somewhere
+    // and wrong the moment he is put down — he kept stepping on the spot.
+    TobbyAnim.setBase('Tobby_Idle');
     TobbyBrain.relax();
   };
-  body.addEventListener('pointerup', endDrag);
-  body.addEventListener('pointercancel', (e)=>{ drag = null; delete dock.dataset.dragging; TobbyBrain.moving = false; });
 
   // Knocking wakes him; otherwise a tap is a hello. A drag is neither.
   body.onclick = (e)=>{
