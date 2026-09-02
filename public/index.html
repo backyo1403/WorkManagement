@@ -11851,7 +11851,13 @@ const TobbyRig = {
     const BONE = /^(ROOT|pelvis|spine|chest|neck|head|jaw|tail\d*|thigh[LR]?|shin[LR]?|forearm[LR]?|paw|ear[LR])$/;
     this.root.traverse(o=>{
       const n = o.name || '';
-      if(/^floof/.test(n)) floof.push(o);
+      // The coat is TWO underscores at the root and one on the tufts under it:
+      // seven `floof__<bone>` groups authored at scale 0, holding fourteen
+      // `floof_<part>` pieces authored at scale 1. Only the roots are the
+      // switch. Collecting all twenty-one and scaling every one of them
+      // multiplied the setting by itself, so a coat asked for 0.45 came out at
+      // 0.20 — the same mistake the leg chain made, in the same shape.
+      if(/^floof__/.test(n)) floof.push(o);
       // wear_<item>__<bone>: one attachment group per item per bone. An item
       // like the santa suit owns five of these (hat, collar, two sleeves,
       // body) and they all have to move together.
