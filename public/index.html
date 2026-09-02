@@ -2676,6 +2676,38 @@ body{
 }
 :root[data-motion="reduced"] .weather-layer *{animation:none !important;}
 
+.tb-modal .modal{max-width:440px;}
+.tb-sec{font-size:9.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--text-3); margin:16px 0 7px;}
+.tb-sec:first-of-type{margin-top:0;}
+.tb-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:7px;}
+.tb-pick{
+  display:flex; align-items:center; gap:8px; min-width:0;
+  padding:9px 11px; border-radius:11px; cursor:pointer;
+  border:1px solid var(--border); background:var(--surface-2); color:var(--text);
+  font-size:12.5px; font-weight:600; text-align:left;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  transition:border-color .12s ease, background .12s ease, transform .12s ease;
+}
+.tb-pick i{font-style:normal; font-size:16px; line-height:1; flex-shrink:0;}
+.tb-pick:hover:not(:disabled){border-color:var(--brand); transform:translateY(-1px);}
+.tb-pick.on{border-color:var(--brand); background:color-mix(in srgb, var(--brand) 14%, transparent);}
+.tb-pick:disabled{opacity:.4; cursor:not-allowed;}
+.tb-pick small{margin-left:auto; font-size:10px; font-weight:600; color:var(--text-3);}
+.tb-cols{display:flex; gap:7px; flex-wrap:wrap;}
+.tb-cols button{
+  width:26px; height:26px; border-radius:50%; padding:0; cursor:pointer;
+  border:2px solid transparent; box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);
+  transition:transform .12s ease, border-color .12s ease;
+}
+.tb-cols button:hover{transform:scale(1.1);}
+.tb-cols button.on{border-color:var(--text); transform:scale(1.06);}
+.tb-age{display:flex; align-items:center; gap:9px; font-size:12px; color:var(--text-2);}
+.tb-age .bar{flex:1; height:7px; border-radius:99px; background:var(--surface-2); overflow:hidden;}
+.tb-age .bar i{display:block; height:100%; background:var(--brand); border-radius:99px;}
+.tb-borrowed{margin-top:9px; padding:9px 11px; border-radius:10px; font-size:11.5px; line-height:1.5;
+  background:color-mix(in srgb, var(--brand) 10%, transparent); color:var(--text-2);}
+
 /* ---------- Tobby ----------
    A fixed strip on the bottom edge, wide enough for him and nothing else. He
    never covers a control: on mobile the bar owns the last 62px and he stands
@@ -5016,6 +5048,7 @@ function refreshWeather(){
       };
       try{ localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify(WEATHER)); }catch(e){}
       applyWeatherScene(kind);
+      try{ TobbyWear.apply(); }catch(e){}    // rain means he puts a coat on
       if(VIEW==='settings') renderView();
     });
   }).catch(()=>{
@@ -11991,6 +12024,487 @@ const TobbyBrain = {
     }
   },
 };
+/* ---------------------------------------------------------
+   State. Small on purpose: everything else is read from the board or the rig.
+   --------------------------------------------------------- */
+function tobbyDefaults(){
+  return {
+    x:null, xp:0, firstMetAt:nowISO(), ageDays:0, lastTick:Date.now(),
+    stage:'puppy', worn:[], unlocked:['scarf'],
+    bowl:{ kind:'empty', color:null, fedCount:0, lastFedAt:null },
+  };
+}
+function tobby(){
+  if(!STATE.tobby || typeof STATE.tobby !== 'object') STATE.tobby = tobbyDefaults();
+  const d = tobbyDefaults();
+  Object.keys(d).forEach(k=>{ if(STATE.tobby[k] === undefined) STATE.tobby[k] = d[k]; });
+  if(!STATE.tobby.bowl) STATE.tobby.bowl = d.bowl;
+  return STATE.tobby;
+}
+
+/* =========================================================
+   GROWING UP
+   ---------------------------------------------------------
+   The rig ships no per-stage meshes and does not key ROOT's scale, so a stage
+   is a set of proportions applied to real bones — checked first that none of
+   them has its scale animated, so this can be set once rather than fought for
+   every frame the way the face has to be.
+
+   Age is wall-clock. Thirty days away is thirty days older; no amount of
+   finished work brings it forward, which is the whole point of a timeline.
+   ========================================================= */
+const TOBBY_STAGES = [
+  { key:'puppy', vi:'Cún nhỏ',       en:'Puppy', days:0,   size:0.80, head:1.20, ear:1.12, floof:false },
+  { key:'young', vi:'Cún lớn',       en:'Young', days:30,  size:0.90, head:1.09, ear:1.06, floof:false },
+  { key:'adult', vi:'Trưởng thành', en:'Grown', days:120, size:1.00, head:1.00, ear:1.00, floof:true  },
+  { key:'elder', vi:'Lão làng',      en:'Elder', days:365, size:1.03, head:0.95, ear:0.97, floof:true  },
+];
+const TOBBY_DAY_MS = 86400000;
+const TobbyGrowth = {
+  /** Days lived, banked on the wall clock so a machine left closed still ages. */
+  tick(){
+    const T = tobby();
+    const last = T.lastTick || Date.now();
+    const days = Math.floor((Date.now() - last) / TOBBY_DAY_MS);
+    if(days > 0){ T.ageDays = (T.ageDays||0) + days; T.lastTick = last + days*TOBBY_DAY_MS; persist(); }
+    return T.ageDays || 0;
+  },
+  ageDays(){ return tobby().ageDays || 0; },
+  stageFor(days){
+    let s = TOBBY_STAGES[0];
+    for(const x of TOBBY_STAGES) if(days >= x.days) s = x;
+    return s;
+  },
+  current(){ return this.stageFor(this.ageDays()); },
+  next(){ return TOBBY_STAGES.find(s=> s.days > this.ageDays()) || null; },
+  progress(){
+    const cur = this.current(), nx = this.next();
+    if(!nx) return { pct:1, cur, next:null, daysLeft:0 };
+    const span = nx.days - cur.days;
+    return { pct: Math.min(1, (this.ageDays()-cur.days)/span), cur, next:nx,
+             daysLeft: Math.max(0, nx.days - this.ageDays()) };
+  },
+  /** Put the proportions on the bones. */
+  apply(){
+    if(!TobbyRig.ready) return false;
+    const s = this.current();
+    TobbyRig.root.scale.setScalar(s.size);
+    const head = TobbyRig.bones.head;   if(head) head.scale.setScalar(s.head);
+    ['earL','earR'].forEach(n=>{ const e = TobbyRig.bones[n]; if(e) e.scale.setScalar(s.ear); });
+    // The extra coat only fills in once he is grown.
+    TobbyRig.floof.forEach(g=> g.scale.setScalar(s.floof ? 1 : 0));
+    tobby().stage = s.key;
+    return true;
+  },
+  /** Called on the clock. An actual change of stage is an event worth seeing. */
+  check(){
+    const T = tobby();
+    const want = this.current().key;
+    if(T.stage === want){ this.apply(); return null; }
+    T.stage = want; persist();
+    this.apply();
+    try{ TobbyBrain.evolve(); }catch(e){}
+    const s = this.current();
+    try{ toast(TB_L('Tobby đã lớn: ' + s.vi, 'Tobby grew up: ' + s.en)); }catch(e){}
+    return s;
+  },
+};
+
+/* =========================================================
+   THE WARDROBE
+   ---------------------------------------------------------
+   The slots come from the rig, not from a list here: TobbyRig.scan() read them
+   out of the wear_<item>__<bone> markers. One item per slot, and the spine slot
+   owns the sleeves too, because nobody wears sleeves on their own.
+   ========================================================= */
+const TB_WEAR_VI = {
+  cap:'Mũ lưỡi trai', hat_brim:'Mũ vành', glasses:'Kính', sunglasses:'Kính râm',
+  santa_hat:'Mũ Noel', scarf:'Khăn quàng', blazer:'Áo vest', sweater:'Áo len',
+  puffer:'Áo phao', raincoat:'Áo mưa', aodai:'Áo dài', vn_flag:'Áo cờ Việt Nam',
+  flower_shirt:'Áo hoa', santa_suit:'Bộ đồ Noel',
+};
+const TB_SLOT_VI = { head:'Đầu', neck:'Cổ', spine:'Thân' };
+/** Earned by staying, not by grinding. */
+const TB_UNLOCK_DAY = {
+  scarf:0, cap:3, glasses:10, sweater:25, hat_brim:45, sunglasses:70,
+  blazer:110, flower_shirt:150, puffer:200, aodai:260, vn_flag:320,
+  santa_hat:30, santa_suit:400, raincoat:60,
+};
+const TobbyWear = {
+  unlocked(){
+    const T = tobby(), age = TobbyGrowth.ageDays();
+    let added = false;
+    Object.entries(TB_UNLOCK_DAY).forEach(([k, day])=>{
+      if(age >= day && !T.unlocked.includes(k)){ T.unlocked.push(k); added = true; }
+    });
+    if(added) persist();
+    return T.unlocked;
+  },
+  /** Clothes the weather lends him.
+   *
+   *  Deliberately NOT filtered by the unlock list. The old build required the
+   *  raincoat to be earned on day 60, so for two months it could rain as hard
+   *  as it liked and he would stand in it bare — a weather feature that cannot
+   *  fire is not a feature. Borrowed items are never added to `unlocked`; he
+   *  gives them back when the sky clears. */
+  borrowed(){
+    const w = (typeof WEATHER === 'object' && WEATHER) ? WEATHER : null;
+    if(!w || !w.kind) return null;
+    if(w.kind === 'rain' || w.kind === 'storm') return 'raincoat';
+    if(w.kind === 'snow') return 'puffer';
+    if(w.temp != null && w.temp <= 12) return 'sweater';
+    if(w.kind === 'clear' && w.temp != null && w.temp >= 34) return 'sunglasses';
+    return null;
+  },
+  /** What he should be wearing right now: his own clothes, plus anything the
+   *  weather has lent him, minus whatever that displaces from the same slot. */
+  outfit(){
+    const T = tobby();
+    const worn = (T.worn||[]).filter(k=> TobbyRig.wear[k]);
+    const lent = this.borrowed();
+    if(!lent || !TobbyRig.wear[lent]) return worn;
+    const clash = new Set(TobbyRig.conflictsWith(lent));
+    return [...worn.filter(k=> !clash.has(k)), lent];
+  },
+  apply(){ return TobbyRig.ready ? TobbyRig.setWorn(this.outfit()) : false; },
+  /** Wearing one thing takes off whatever shared its slot. */
+  toggle(item){
+    const T = tobby();
+    if(!TobbyRig.wear[item]) return false;
+    if((T.worn||[]).includes(item)) T.worn = T.worn.filter(k=>k!==item);
+    else {
+      const clash = new Set(TobbyRig.conflictsWith(item));
+      T.worn = [...(T.worn||[]).filter(k=> !clash.has(k)), item];
+    }
+    persist(); this.apply();
+    return true;
+  },
+};
+
+/* =========================================================
+   THE BOWL
+   ---------------------------------------------------------
+   bowl_root sits at scale 1 and no clip keys it, which is the change that made
+   this simple: the bowl is an object the app owns, not a prop the animation
+   lends out for four seconds. The previous rig keyed prop_bowl to zero in all
+   35 clips, and working around that cost a second 45KB model in a second
+   WebGL scene.
+
+   The file ships exactly one dish — 36 kibble meshes. That one is shown as
+   authored; the other seven are built as voxels into bowl_food, fitted to the
+   volume the kibble occupies so they land where the eating animation expects
+   food to be.
+   ========================================================= */
+const TB_BOWL_EAT_MS = 30000;
+const TB_BOWL_XP = 5;
+const TB_BOWL_CLAY = '#B4562C';
+const TB_BOWL_FOODS = [
+  ['empty',   '🍽️', 'Bát không', []],
+  ['water',   '💧', 'Nước',      [[0x53AEE0, 1,0.00,1.84,0.55]]],
+  ['kibble',  '🌰', 'Hạt',       'rig'],
+  ['bone',    '🦴', 'Xương',     [[0xEDE3D2, 7,0.55,0.46,0.55],[0xD8C9AF, 4,0.40,0.34,0.82]]],
+  ['xoi',     '🍚', 'Xôi xéo',   [[0xF2C744,18,0.68,0.38,0.55],[0xE08A2B, 8,0.44,0.32,0.86]]],
+  ['veg',     '🥦', 'Rau củ',    [[0x4E9A46,12,0.66,0.40,0.58],[0xE0762B, 7,0.52,0.34,0.80],[0xC93F3F,4,0.40,0.28,0.92]]],
+  ['comthit', '🍛', 'Cơm thịt',  [[0xF3EEE2,18,0.70,0.34,0.52],[0x8A4A24, 8,0.46,0.40,0.84]]],
+  ['ga',      '🍗', 'Thịt gà',   [[0xD79A46,10,0.56,0.48,0.58],[0xA9642A, 6,0.42,0.38,0.86]]],
+  ['pho',     '🍜', 'Phở',       [[0xC9A24B, 1,0.00,1.80,0.30],[0xF4EFE0,14,0.62,0.26,0.54],[0x7A4526,6,0.46,0.34,0.74]]],
+];
+const TB_BOWL_COLORS = [
+  [TB_BOWL_CLAY,'Đất nung'], ['#C0483A','Đỏ gạch'], ['#2E7BC4','Xanh dương'],
+  ['#3E8F5A','Xanh lá'],     ['#E0A33A','Vàng'],    ['#7C5CBF','Tím'], ['#4A5568','Xám'],
+];
+
+const TobbyBowl = {
+  fit:null, mine:null,
+  state(){ return tobby().bowl; },
+
+  /** Measure the basin once, from the rig's own kibble: it already occupies
+   *  exactly the volume a dish should. */
+  measure(){
+    if(this.fit || !TobbyRig.ready) return this.fit;
+    const T = TobbyRig.THREE, box = new T.Box3();
+    // Accumulate the matrices from bowl_food DOWN to each kibble mesh. Using a
+    // mesh's own `matrix` measures it relative to its parent, and the kibble
+    // sits two levels deep under bowl_contents — so that measured one biscuit
+    // (r = 0.02) instead of the heap (r = 0.10) and every dish came out five
+    // times too small for the bowl. Not matrixWorld either: the served food is
+    // a child of bowl_food, so bowl_food's own frame is the one it is built in.
+    // And update the matrices before reading them. `matrix` is composed lazily,
+    // so the first call — which happens during load, before anything has been
+    // rendered — walked a tree of identity transforms and measured a single
+    // 0.04 biscuit as if it were the whole heap. The wrong answer was then
+    // cached for the life of the page, which is why it looked like the fix had
+    // not applied when the same code run later gave the right number.
+    const base = TobbyRig.bowl.food;
+    TobbyRig.root.updateMatrixWorld(true);
+    const want = new Set(TobbyRig.bowl.rigKibble);
+    (function walk(o, m){
+      const mm = o === base ? m : new T.Matrix4().multiplyMatrices(m, o.matrix);
+      if(want.has(o) && o.geometry){
+        o.geometry.computeBoundingBox();
+        box.union(o.geometry.boundingBox.clone().applyMatrix4(mm));
+      }
+      o.children.forEach(c=> walk(c, mm));
+    })(base, new T.Matrix4());
+    const size = box.getSize(new T.Vector3());
+    this.fit = box.isEmpty()
+      ? { r:0.10, floor:0.04, top:0.16 }
+      : { r: Math.max(size.x, size.z)*0.5, floor: box.min.y, top: box.max.y };
+    return this.fit;
+  },
+
+  show(on){ if(TobbyRig.ready) TobbyRig.bowl.root.visible = !!on; },
+  visible(){ return TobbyRig.ready && TobbyRig.bowl.root.visible; },
+
+  /** Voxel clusters, in the bowl's own idiom. Layers are
+   *  [colour, count, spread, size, height] — enough vocabulary to say
+   *  'broth, pale noodles, dark slices' without hand-modelling phở. */
+  build(kind){
+    if(!TobbyRig.ready) return 0;
+    const T = TobbyRig.THREE, fit = this.measure();
+    if(!this.mine){
+      this.mine = new T.Group(); this.mine.name = 'tb_served';
+      TobbyRig.bowl.food.add(this.mine);
+    }
+    while(this.mine.children.length){
+      const c = this.mine.children.pop();
+      c.geometry && c.geometry.dispose(); c.material && c.material.dispose();
+      this.mine.remove(c);
+    }
+    const def = TB_BOWL_FOODS.find(f=>f[0]===kind);
+    const rigOwn = def && def[3] === 'rig';
+    // The rig's own dish is shown as authored rather than imitated.
+    TobbyRig.bowl.rigKibble.forEach(m=> m.visible = !!rigOwn);
+    if(!def || rigOwn || !def[3] || !def[3].length) return rigOwn ? TobbyRig.bowl.rigKibble.length : 0;
+    let seed = 0; for(const ch of kind) seed = (seed*31 + ch.charCodeAt(0)) >>> 0;
+    const rnd = ()=> ((seed = (seed*1664525 + 1013904223) >>> 0) / 4294967296);
+    const rise = fit.top - fit.floor;
+    let n = 0;
+    def[3].forEach(([colour, count, spread, size, height])=>{
+      const pool = count === 1;
+      const s = fit.r * (pool ? Math.min(size, 1.84) : size);
+      const geo = new T.BoxGeometry(s, s * (pool ? 0.22 : 0.85), s);
+      const mat = new T.MeshStandardMaterial({ color:colour, roughness:0.72, metalness:0.02,
+        transparent:pool, opacity: pool ? 0.92 : 1 });
+      for(let i=0;i<count;i++){
+        const m = new T.Mesh(geo, mat);
+        const y = fit.floor + height * rise;
+        if(pool) m.position.set(0, y, 0);
+        else{
+          const a = rnd()*Math.PI*2, d = Math.sqrt(rnd()) * fit.r * spread;
+          m.position.set(Math.cos(a)*d, y + rnd()*s*0.25, Math.sin(a)*d);
+          m.rotation.y = rnd()*Math.PI;
+        }
+        this.mine.add(m); n++;
+      }
+    });
+    return n;
+  },
+
+  /** Repaint the bowl itself. Checked that none of its three materials is
+   *  shared with the dog, so a green bowl cannot give you a green dog. */
+  setColor(hex, quiet){
+    if(!hex) return false;
+    if(!quiet){ this.state().color = hex; persist(); }
+    if(!TobbyRig.ready) return false;
+    const base = new TobbyRig.THREE.Color(hex);
+    const seen = new Set();
+    TobbyRig.bowl.prop.traverse(o=>{
+      if(!o.isMesh || !o.material || !o.material.color || seen.has(o.material)) return;
+      seen.add(o.material);
+      const n = o.material.name || '';
+      const k = /rim/.test(n) ? 1.16 : /inner/.test(n) ? 0.78 : 1;
+      o.material.color.copy(base).multiplyScalar(k);
+    });
+    return true;
+  },
+
+  apply(){
+    if(!TobbyRig.ready) return false;
+    const s = this.state();
+    this.build(s.kind || 'empty');
+    this.setColor(s.color || TB_BOWL_CLAY, true);
+    this.show(s.kind !== 'empty');
+    return true;
+  },
+};
+
+/* ---------- feeding ---------- */
+let tbFeedTimer = 0, tbMealResumed = false;
+/** Serve a dish and let him eat it. Not gated on the model: a meal is state, a
+ *  timer and some XP, none of which need WebGL. */
+function tobbyFeed(kind){
+  const bowl = tobby().bowl;
+  if(kind === 'empty'){ tobbyEndMeal({ cancel:true }); return; }
+  if(bowl.kind !== 'empty') return;              // one meal at a time
+  bowl.kind = kind;
+  bowl.fedCount = (bowl.fedCount||0) + 1;
+  bowl.lastFedAt = nowISO();
+  persist();
+  TobbyBowl.apply();
+  TobbyBrain.feel('happy', 1600);
+  TobbyAnim.playAction('Tobby_EatFromBowl', TB_BOWL_EAT_MS);
+  clearTimeout(tbFeedTimer);
+  tbFeedTimer = setTimeout(tobbyEndMeal, TB_BOWL_EAT_MS);
+}
+/** Meal over: empty the bowl and pay the XP.
+ *
+ *  Clearing the timer is not tidiness. Without it a meal that ended any other
+ *  way left a live thirty-second timer behind, which then fired during the NEXT
+ *  meal and cut it short while paying out its XP early. */
+function tobbyEndMeal(opts){
+  clearTimeout(tbFeedTimer); tbFeedTimer = 0;
+  const bowl = tobby().bowl;
+  const wasFed = bowl.kind !== 'empty';
+  bowl.kind = 'empty';
+  persist();
+  TobbyBowl.apply();
+  if(!wasFed) return;
+  // Taking the food away is not a meal — he is paid for one he finished.
+  if(!(opts && opts.cancel)){ tobby().xp = (tobby().xp||0) + TB_BOWL_XP; persist(); }
+  if(TobbyAnim.actionName === 'Tobby_EatFromBowl') TobbyAnim.endAction();
+  TobbyBrain.relax();
+}
+/** A meal must not outlive the page: the dish is saved but the timer only ever
+ *  lived in memory, so a reload used to leave the bowl permanently mid-meal —
+ *  every dish refused, and no meal running either. */
+function tobbyResumeMeal(){
+  if(tbMealResumed) return;
+  const bowl = tobby().bowl;
+  if(bowl.kind === 'empty'){ tbMealResumed = true; return; }
+  const started = Date.parse(bowl.lastFedAt || '') || 0;
+  const left = started ? TB_BOWL_EAT_MS - (Date.now() - started) : 0;
+  if(left <= 800){ tbMealResumed = true; tobbyEndMeal(); return; }
+  tbMealResumed = true;
+  TobbyBowl.apply();
+  TobbyAnim.playAction('Tobby_EatFromBowl', left);
+  clearTimeout(tbFeedTimer);
+  tbFeedTimer = setTimeout(tobbyEndMeal, left);
+}
+/* ---------------------------------------------------------
+   The panel. One window, opened by right-clicking him, reaching everything he
+   can be asked to do. Dishes and outfits are laid out on a fixed grid rather
+   than a wrapped row: items that reflow into a different shape each time are
+   hard to aim at.
+   --------------------------------------------------------- */
+function tobbyPanel(){
+  document.querySelectorAll('.tb-modal').forEach(m=> m.remove());
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay tb-modal';
+  const close = ()=> overlay.remove();
+  const L2 = TB_L;
+
+  function draw(){
+    const T = tobby(), b = T.bowl;
+    const eating = b.kind !== 'empty';
+    const cur = TB_BOWL_FOODS.find(f=>f[0]===b.kind);
+    const g = TobbyGrowth.progress();
+    const ready = TobbyRig.ready;
+    const unlocked = TobbyWear.unlocked();
+    const lent = TobbyWear.borrowed();
+    const worn = new Set(TobbyWear.outfit());
+
+    // An item occupies every slot it has a marker for — the raincoat is head,
+    // neck AND spine — so listing the slots verbatim showed it three times.
+    // Each item is filed once, under the most body-covering slot it uses,
+    // which is also the one a person would look for it in.
+    const PRIMARY = ['spine','neck','head'];
+    const filed = {};
+    Object.keys(TobbyRig.wear).forEach(item=>{
+      const slot = PRIMARY.find(s=> (TobbyRig.slots[s]||[]).includes(item));
+      if(slot) (filed[slot] = filed[slot] || []).push(item);
+    });
+    const slotRows = ['head','neck','spine']
+      .filter(s=> filed[s] && filed[s].length)
+      .map(s=> [s, filed[s].sort()])
+      .map(([slot, items])=>
+      '<div class="tb-sec">' + esc(TB_SLOT_VI[slot] || slot) + '</div>' +
+      '<div class="tb-grid">' + items.map(it=>{
+        const own = unlocked.includes(it);
+        const day = TB_UNLOCK_DAY[it];
+        const isLent = lent === it;
+        return '<button class="tb-pick ' + (worn.has(it)?'on':'') + '" data-wear="' + it + '"' +
+          (own ? '' : ' disabled') + '>' +
+          '<i>' + (isLent ? '\u2601\ufe0f' : own ? '\u2713' : '\ud83d\udd12') + '</i>' +
+          esc(TB_WEAR_VI[it] || it) +
+          (own ? (isLent ? '<small>' + L2('th\u1eddi ti\u1ebft','weather') + '</small>' : '')
+               : '<small>' + L2('ng\u00e0y ' + day, 'day ' + day) + '</small>') +
+          '</button>';
+      }).join('') + '</div>').join('');
+
+    overlay.innerHTML =
+      '<div class="modal">' +
+        '<div class="modal-header">' +
+          '<div class="modal-title">\ud83d\udc36 Tobby</div>' +
+          '<button class="close-x" data-x>\u2715</button>' +
+        '</div>' +
+        '<div class="tb-age">' +
+          '<b>' + esc(LANG==='en' ? g.cur.en : g.cur.vi) + '</b>' +
+          '<span class="bar"><i style="width:' + Math.round(g.pct*100) + '%"></i></span>' +
+          '<span>' + (g.next
+            ? L2(g.daysLeft + ' ng\u00e0y n\u1eefa', g.daysLeft + ' days')
+            : L2('\u0111\u00e3 tr\u01b0\u1edfng th\u00e0nh','fully grown')) + '</span>' +
+        '</div>' +
+        '<div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">' +
+          L2('Ng\u00e0y ' + TobbyGrowth.ageDays(), 'Day ' + TobbyGrowth.ageDays()) +
+          ' \u00b7 ' + (T.xp||0) + ' XP \u00b7 ' +
+          L2('\u0111\u00e3 cho \u0103n ' + (b.fedCount||0) + ' l\u1ea7n', (b.fedCount||0) + ' meals') +
+        '</div>' +
+        (ready ? '' : '<div class="tb-borrowed">' +
+          L2('Ch\u01b0a t\u1ea3i \u0111\u01b0\u1ee3c h\u00ecnh 3D \u2014 v\u1eabn cho \u0103n v\u00e0 thay \u0111\u1ed3 \u0111\u01b0\u1ee3c nh\u01b0 th\u01b0\u1eddng.',
+             'The 3D model has not loaded \u2014 feeding and dressing still work.') + '</div>') +
+
+        '<div class="tb-sec">' + L2('Cho \u0103n','Feed') +
+          (eating ? ' \u00b7 ' + L2('\u0111ang \u0103n ' + (cur?cur[2]:''), 'eating') : '') + '</div>' +
+        '<div class="tb-grid">' +
+          TB_BOWL_FOODS.filter(f=>f[0]!=='empty').map(f=>
+            '<button class="tb-pick ' + (b.kind===f[0]?'on':'') + '" data-food="' + f[0] + '"' +
+            (eating?' disabled':'') + '><i>' + f[1] + '</i>' + esc(f[2]) + '</button>').join('') +
+        '</div>' +
+        (eating ? '<div style="margin-top:8px;"><button class="btn btn-ghost btn-sm" data-stop>' +
+          L2('D\u1eebng b\u1eefa','Stop the meal') + '</button></div>' : '') +
+
+        '<div class="tb-sec">' + L2('M\u00e0u b\u00e1t','Bowl colour') + '</div>' +
+        '<div class="tb-cols">' +
+          TB_BOWL_COLORS.map(c=>
+            '<button data-col="' + c[0] + '" title="' + esc(c[1]) + '" class="' +
+            ((b.color||TB_BOWL_CLAY).toLowerCase()===c[0].toLowerCase()?'on':'') +
+            '" style="background:' + c[0] + '"></button>').join('') +
+        '</div>' +
+
+        slotRows +
+        (lent ? '<div class="tb-borrowed">' + L2(
+            'Tr\u1eddi ' + (WEATHER.kind==='rain'||WEATHER.kind==='storm' ? 'm\u01b0a' : WEATHER.kind==='snow' ? 'tuy\u1ebft' : 'th\u1ea5t th\u01b0\u1eddng') +
+            ' \u2014 Tobby \u0111ang m\u01b0\u1ee3n ' + (TB_WEAR_VI[lent]||lent) + '. Tr\u1ea3 l\u1ea1i khi tr\u1eddi \u0111\u1eb9p.',
+            'Weather gear on loan: ' + (TB_WEAR_VI[lent]||lent) + '.') + '</div>' : '') +
+      '</div>';
+    wire();
+  }
+
+  function wire(){
+    // Everything here stops the click bubbling: these handlers redraw their own
+    // container, which detaches the node that was clicked, and any listener
+    // further up then reads a target belonging to nothing.
+    overlay.querySelector('[data-x]').onclick = (e)=>{ e.stopPropagation(); close(); };
+    overlay.onclick = (e)=>{ if(e.target === overlay){ e.stopPropagation(); close(); } };
+    overlay.querySelectorAll('[data-food]').forEach(el=> el.onclick = (e)=>{
+      e.stopPropagation(); tobbyFeed(el.dataset.food); close();
+    });
+    const stop = overlay.querySelector('[data-stop]');
+    if(stop) stop.onclick = (e)=>{ e.stopPropagation(); tobbyEndMeal({cancel:true}); draw(); };
+    overlay.querySelectorAll('[data-col]').forEach(el=> el.onclick = (e)=>{
+      e.stopPropagation(); TobbyBowl.setColor(el.dataset.col); draw();
+    });
+    overlay.querySelectorAll('[data-wear]').forEach(el=> el.onclick = (e)=>{
+      e.stopPropagation(); TobbyWear.toggle(el.dataset.wear); draw();
+    });
+  }
+
+  draw();
+  document.body.appendChild(overlay);
+  const esc2 = (e)=>{ if(e.key==='Escape'){ close(); document.removeEventListener('keydown', esc2); } };
+  document.addEventListener('keydown', esc2);
+}
 /** Put him in the DOM and keep him there.
  *
  *  render() rebuilds the whole shell, so the stage element is a NEW node on
@@ -12018,6 +12532,12 @@ function wireTobbyStage(){
     if(!ok) return;
     TobbyAnim.setBase('Tobby_Idle');
     TobbyAnim.start();
+    TobbyGrowth.tick();
+    TobbyGrowth.apply();
+    TobbyWear.unlocked();
+    TobbyWear.apply();
+    TobbyBowl.apply();
+    tobbyResumeMeal();
     TobbyBrain.relax();
     TobbyBrain.restorePlace();
     wireTobbyInteraction();
@@ -12061,6 +12581,8 @@ function wireTobbyInteraction(){
   };
   document.addEventListener('pointermove', tbDocMove, { passive:true });
 
+  dock.oncontextmenu = (e)=>{ e.preventDefault(); tobbyPanel(); };
+
   // Knocking wakes him; otherwise a tap is a hello.
   body.onclick = (e)=>{
     e.stopPropagation();
@@ -12095,6 +12617,12 @@ function wireTobbyInteraction(){
   // Ambient systems. Each guards itself, so a failure in one never stops boot.
   try{ startAlarmEngine(); renderAlarmDock(); }catch(e){ console.warn('alarms', e); }
   try{ startWeather(); }catch(e){ console.warn('weather', e); }
+  // He ages on the wall clock and dresses for the sky. Both are cheap enough
+  // to check every minute, and doing so means a machine left open overnight
+  // wakes up a day older instead of waiting for a reload.
+  setInterval(()=>{
+    try{ TobbyGrowth.tick(); TobbyGrowth.check(); TobbyWear.unlocked(); TobbyWear.apply(); }catch(e){}
+  }, 60*1000);
 })();
 </script>
 </body>
