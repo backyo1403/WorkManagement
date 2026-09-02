@@ -2676,7 +2676,28 @@ body{
 }
 :root[data-motion="reduced"] .weather-layer *{animation:none !important;}
 
-.tb-modal .modal{max-width:440px;}
+/* A popup beside him, not a sheet over the app.
+   He lives in a corner and everything he does is about the board behind him,
+   so covering that board to talk to him was backwards. No backdrop either:
+   the app stays readable and stays clickable, and a click anywhere else just
+   closes this. */
+.tb-pop{
+  position:fixed; z-index:200; width:min(330px, calc(100vw - 20px));
+  max-height:min(74vh, 560px); overflow-y:auto;
+  background:var(--surface); border:1px solid var(--border); border-radius:16px;
+  box-shadow:var(--shadow-lg); padding:12px 13px 14px;
+  animation:tbPopIn .16s cubic-bezier(.34,1.3,.64,1) both;
+}
+@keyframes tbPopIn{ from{opacity:0; transform:translateY(6px) scale(.97);} to{opacity:1; transform:none;} }
+:root:not([data-motion="full"]) .tb-pop{ animation:none; }
+.tb-pop-head{display:flex; align-items:center; gap:8px; margin-bottom:10px;}
+.tb-pop-head .tb-title{flex:1; min-width:0; font-size:14px; font-weight:750;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.tb-pop-head button{
+  border:none; background:none; color:var(--text-3); cursor:pointer;
+  font-size:17px; line-height:1; padding:2px 4px; border-radius:7px;
+}
+.tb-pop-head button:hover{background:var(--surface-2); color:var(--text);}
 .tb-sec{font-size:9.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
   color:var(--text-3); margin:16px 0 7px;}
 .tb-sec:first-of-type{margin-top:0;}
@@ -2763,24 +2784,32 @@ body{
    never covers a control: on mobile the bar owns the last 62px and he stands
    on its roof. */
 .tobby-dock{
-  position:fixed; bottom:0; left:0; z-index:130;
+  /* Lifted clear of the bottom edge. Sitting flush on it put his feet in the
+     last few pixels of the window, and the viewport is taller than the button
+     that holds it — so the bottom of the render fell off the screen entirely
+     and he stood there with no paws. */
+  position:fixed; bottom:26px; left:0; z-index:130;
   width:76px; height:88px; pointer-events:none;
   display:flex; align-items:flex-end; justify-content:center;
   transition:left .18s cubic-bezier(.22,.61,.36,1);
 }
+.tobby-dock[data-dragging="1"]{ transition:none; }
+/* The button is the whole dock. It used to be 72x72 holding a 76x88 stage,
+   which overflowed it by sixteen pixels downward — measured on the deployed
+   build as a stage bottom sixteen pixels below the window. */
 .tb-body{
   position:relative; pointer-events:auto; cursor:grab;
-  width:72px; height:72px; padding:0; border:none; background:none;
+  width:100%; height:100%; padding:0; border:none; background:none;
   touch-action:none;
   -webkit-tap-highlight-color:transparent;
 }
 .tb-body:active{cursor:grabbing;}
-.tb-stage{display:block; width:76px; height:88px;}
+.tb-stage{display:block; width:100%; height:100%;}
 .tb-stage canvas{display:block; width:100%; height:100%;}
 @media (max-width:699px){
-  .tobby-dock{bottom:68px; width:60px; height:64px;}
-  .tb-body{width:56px; height:56px;}
-  .tb-stage{width:60px; height:64px;}
+  /* The bottom bar owns the last 62px; clearing it entirely plus the same lift
+     keeps him off every nav button. */
+  .tobby-dock{bottom:94px; width:64px; height:74px;}
 }
 @media print{ .tobby-dock{display:none !important;} }
 </style>
@@ -12099,7 +12128,9 @@ const TobbyBrain = {
     if(!dock) return;
     const w = dock.offsetWidth || 76;
     const saved = (STATE.tobby && typeof STATE.tobby.x === 'number') ? STATE.tobby.x : null;
-    const x = saved == null ? innerWidth - w - 24 : saved;
+    // Bottom-right by default: the far corner from the navigation, and the one
+    // part of the window nothing else is using.
+    const x = saved == null ? innerWidth - w - 16 : saved;
     dock.style.left = Math.max(6, Math.min(x, innerWidth - w - 6)) + 'px';
     this.x = parseFloat(dock.style.left);
   },
@@ -12492,6 +12523,67 @@ function tobbyResumeMeal(){
    than a wrapped row: items that reflow into a different shape each time are
    hard to aim at.
    --------------------------------------------------------- */
+/** A popup anchored beside Tobby.
+ *
+ *  Placed above him when there is room and below when there is not, and always
+ *  nudged back inside the window — he can be dragged to either edge, and a
+ *  panel that opens off-screen is a panel that does not exist. Returns the
+ *  element plus a close(); the caller fills the body.
+ *
+ *  There is deliberately no backdrop. The board behind him stays readable and
+ *  stays usable, and a click anywhere outside simply closes this. */
+function tobbyPopup(title, onClose){
+  document.querySelectorAll('.tb-pop').forEach(p=> p.remove());
+  const pop = document.createElement('div');
+  pop.className = 'tb-pop';
+  pop.innerHTML = '<div class="tb-pop-head">' +
+    '<div class="tb-title">' + title + '</div>' +
+    '<button data-x aria-label="close">\u2715</button></div>' +
+    '<div class="tb-pop-body"></div>';
+  document.body.appendChild(pop);
+
+  let away = null;
+  const close = ()=>{
+    pop.remove();
+    if(away) document.removeEventListener('pointerdown', away);
+    document.removeEventListener('keydown', onKey);
+    removeEventListener('resize', place);
+    if(onClose) onClose();
+  };
+  const onKey = (e)=>{ if(e.key === 'Escape') close(); };
+
+  function place(){
+    const dock = document.getElementById('tobbyDock');
+    const r = dock ? dock.getBoundingClientRect()
+                   : { left:innerWidth-90, right:innerWidth-14, top:innerHeight-100, bottom:innerHeight-14 };
+    const w = pop.offsetWidth, h = pop.offsetHeight;
+    // Centred on him, then pulled back inside the window.
+    const left = Math.max(10, Math.min(r.left + r.width/2 - w/2, innerWidth - w - 10));
+    // Above him if it fits, otherwise below — on a short window neither fits
+    // fully and the clamp keeps it on screen rather than half off the top.
+    const above = r.top - h - 10;
+    const top = above >= 10 ? above : Math.min(r.bottom + 10, innerHeight - h - 10);
+    pop.style.left = Math.round(left) + 'px';
+    pop.style.top  = Math.round(Math.max(10, top)) + 'px';
+  }
+  place();
+  addEventListener('resize', place, { passive:true });
+
+  pop.querySelector('[data-x]').onclick = (e)=>{ e.stopPropagation(); close(); };
+  // Deferred by a tick, or the very click that opened this would close it.
+  setTimeout(()=>{
+    away = (e)=>{
+      if(pop.contains(e.target)) return;
+      const dock = document.getElementById('tobbyDock');
+      if(dock && dock.contains(e.target)) return;   // his own menu re-opens it
+      close();
+    };
+    document.addEventListener('pointerdown', away);
+  }, 0);
+  document.addEventListener('keydown', onKey);
+
+  return { el: pop, body: pop.querySelector('.tb-pop-body'), close, place };
+}
 /* ---------------------------------------------------------
    Ask Tobby. Answers are computed from the board, not generated: he reads the
    same STATE every view reads and says what is in it. The Gemini action layer
@@ -12604,12 +12696,11 @@ function tobbyAsk(text){
    else below the fold.
    --------------------------------------------------------- */
 function tobbyPanel(){
-  document.querySelectorAll('.tb-modal').forEach(m=> m.remove());
-  const overlay = document.createElement('div');
-  overlay.className = 'overlay tb-modal';
-  const close = ()=> overlay.remove();
   const L2 = TB_L;
   let answer = null;
+  const pop = tobbyPopup('\ud83d\udc36 Tobby');
+  const overlay = pop.el;
+  const close = pop.close;
 
   function draw(){
     const g = TobbyGrowth.progress();
@@ -12618,12 +12709,7 @@ function tobbyPanel(){
     const eating = b.kind !== 'empty';
     const cur = TB_BOWL_FOODS.find(f=>f[0]===b.kind);
     const lent = TobbyWear.borrowed();
-    overlay.innerHTML =
-      '<div class="modal">' +
-        '<div class="modal-header">' +
-          '<div class="modal-title">\ud83d\udc36 Tobby</div>' +
-          '<button class="close-x" data-x>\u2715</button>' +
-        '</div>' +
+    pop.body.innerHTML =
         '<div class="tb-age">' +
           '<b>' + esc(LANG==='en' ? g.cur.en : g.cur.vi) + '</b>' +
           '<span class="bar"><i style="width:' + Math.round(g.pct*100) + '%"></i></span>' +
@@ -12667,15 +12753,13 @@ function tobbyPanel(){
                      : lent ? L2('\u0111ang m\u01b0\u1ee3n ' + (TB_WEAR_VI[lent]||lent), 'wearing ' + lent)
                      : L2('b\u00e1t \u0111ang tr\u1ed1ng', 'bowl empty')) + '</small></span>' +
           '<em>\u203a</em>' +
-        '</button>' +
-      '</div>';
+        '</button>';
     wire();
+    pop.place();          // the height changed, so where it sits does too
   }
 
   function wire(){
     const show = (r)=>{ answer = r; draw(); };
-    overlay.querySelector('[data-x]').onclick = (e)=>{ e.stopPropagation(); close(); };
-    overlay.onclick = (e)=>{ if(e.target === overlay){ e.stopPropagation(); close(); } };
     overlay.querySelectorAll('[data-q-key]').forEach(b=> b.onclick = (e)=>{
       e.stopPropagation(); show(tobbyAnswer(b.dataset.qKey));
     });
@@ -12706,19 +12790,21 @@ function tobbyPanel(){
   }
 
   draw();
-  document.body.appendChild(overlay);
-  const esc2 = (e)=>{ if(e.key==='Escape'){ close(); document.removeEventListener('keydown', esc2); } };
-  document.addEventListener('keydown', esc2);
 }
 /** Feeding, the bowl's colour and the wardrobe — one screen, opened from the
  *  main panel rather than living in it. Three long sections in the same window
  *  as the ask box pushed everything else below the fold. */
 function tobbyCarePanel(){
-  document.querySelectorAll('.tb-modal').forEach(m=> m.remove());
-  const overlay = document.createElement('div');
-  overlay.className = 'overlay tb-modal';
-  const close = ()=> overlay.remove();
   const L2 = TB_L;
+  const pop = tobbyPopup('\ud83c\udf7d\ufe0f ' + TB_L('Ch\u0103m s\u00f3c Tobby','Look after Tobby'));
+  const overlay = pop.el;
+  const close = pop.close;
+  // A way back to the main panel, in the popup's own header.
+  const back = document.createElement('button');
+  back.textContent = '\u2039';
+  back.style.cssText = 'font-size:20px;order:-1;';
+  back.onclick = (e)=>{ e.stopPropagation(); close(); tobbyPanel(); };
+  pop.el.querySelector('.tb-pop-head').prepend(back);
 
   function draw(){
     const T = tobby(), b = T.bowl;
@@ -12758,13 +12844,7 @@ function tobbyCarePanel(){
           '</button>';
       }).join('') + '</div>').join('');
 
-    overlay.innerHTML =
-      '<div class="modal">' +
-        '<div class="modal-header">' +
-          '<button class="tb-back" data-back>\u2039</button>' +
-          '<div class="modal-title">\ud83c\udf7d\ufe0f ' + L2('Ch\u0103m s\u00f3c Tobby','Look after Tobby') + '</div>' +
-          '<button class="close-x" data-x>\u2715</button>' +
-        '</div>' +
+    pop.body.innerHTML =
         '<div class="tb-age">' +
           '<b>' + esc(LANG==='en' ? g.cur.en : g.cur.vi) + '</b>' +
           '<span class="bar"><i style="width:' + Math.round(g.pct*100) + '%"></i></span>' +
@@ -12803,19 +12883,15 @@ function tobbyCarePanel(){
         (lent ? '<div class="tb-borrowed">' + L2(
             'Tr\u1eddi ' + (WEATHER.kind==='rain'||WEATHER.kind==='storm' ? 'm\u01b0a' : WEATHER.kind==='snow' ? 'tuy\u1ebft' : 'th\u1ea5t th\u01b0\u1eddng') +
             ' \u2014 Tobby \u0111ang m\u01b0\u1ee3n ' + (TB_WEAR_VI[lent]||lent) + '. Tr\u1ea3 l\u1ea1i khi tr\u1eddi \u0111\u1eb9p.',
-            'Weather gear on loan: ' + (TB_WEAR_VI[lent]||lent) + '.') + '</div>' : '') +
-      '</div>';
+            'Weather gear on loan: ' + (TB_WEAR_VI[lent]||lent) + '.') + '</div>' : '');
     wire();
+    pop.place();
   }
 
   function wire(){
     // Everything here stops the click bubbling: these handlers redraw their own
     // container, which detaches the node that was clicked, and any listener
     // further up then reads a target belonging to nothing.
-    overlay.querySelector('[data-x]').onclick = (e)=>{ e.stopPropagation(); close(); };
-    const back = overlay.querySelector('[data-back]');
-    if(back) back.onclick = (e)=>{ e.stopPropagation(); close(); tobbyPanel(); };
-    overlay.onclick = (e)=>{ if(e.target === overlay){ e.stopPropagation(); close(); } };
     overlay.querySelectorAll('[data-food]').forEach(el=> el.onclick = (e)=>{
       e.stopPropagation(); tobbyFeed(el.dataset.food); close();
     });
@@ -12830,9 +12906,6 @@ function tobbyCarePanel(){
   }
 
   draw();
-  document.body.appendChild(overlay);
-  const esc2 = (e)=>{ if(e.key==='Escape'){ close(); document.removeEventListener('keydown', esc2); } };
-  document.addEventListener('keydown', esc2);
 }
 /** Put him in the DOM and keep him there.
  *
@@ -12922,10 +12995,54 @@ function wireTobbyInteraction(){
 
   dock.oncontextmenu = (e)=>{ e.preventDefault(); tobbyPanel(); };
 
-  // Knocking wakes him; otherwise a tap is a hello.
+  // Hold and drag him along the bottom edge. Sideways only: his height is not
+  // a free choice, he stands on the floor.
+  let drag = null;
+  body.addEventListener('pointerdown', (e)=>{
+    if(e.button && e.button !== 0) return;
+    // Clear it HERE, not after the click that consumes it. Left set, the flag
+    // from one drag swallowed the next plain tap — so the first click after
+    // moving him did nothing at all.
+    delete dock.dataset.justDragged;
+    drag = { x:e.clientX, left:parseFloat(dock.style.left) || dock.getBoundingClientRect().x, moved:false };
+    try{ body.setPointerCapture(e.pointerId); }catch(_){}
+  });
+  body.addEventListener('pointermove', (e)=>{
+    if(!drag || !TobbyRig.ready) return;
+    const dx = e.clientX - drag.x;
+    if(!drag.moved && Math.abs(dx) < 5) return;    // a tap has a little wobble
+    if(!drag.moved){
+      drag.moved = true;
+      dock.dataset.dragging = '1';
+      TobbyBrain.moving = true;
+      TobbyAnim.setBase('Tobby_Walk');
+    }
+    const w = dock.offsetWidth || 76;
+    dock.style.left = Math.max(6, Math.min(innerWidth - w - 6, drag.left + dx)) + 'px';
+    TobbyBrain.face(dx < 0 ? -1 : 1);
+  });
+  const endDrag = (e)=>{
+    if(!drag) return;
+    const moved = drag.moved;
+    drag = null;
+    delete dock.dataset.dragging;
+    try{ body.releasePointerCapture(e.pointerId); }catch(_){}
+    if(!moved) return;                              // a tap; onclick handles it
+    dock.dataset.justDragged = '1';                 // the click that follows is not a tap
+    TobbyBrain.moving = false;
+    TobbyBrain.x = parseFloat(dock.style.left) || 0;
+    TobbyBrain.faceForward();
+    TobbyBrain.savePlace();
+    TobbyBrain.relax();
+  };
+  body.addEventListener('pointerup', endDrag);
+  body.addEventListener('pointercancel', (e)=>{ drag = null; delete dock.dataset.dragging; TobbyBrain.moving = false; });
+
+  // Knocking wakes him; otherwise a tap is a hello. A drag is neither.
   body.onclick = (e)=>{
     e.stopPropagation();
     if(!TobbyRig.ready) return;
+    if(dock.dataset.justDragged){ delete dock.dataset.justDragged; return; }
     if(TobbyBrain.sleeping){ TobbyBrain.wake(); return; }
     TobbyBrain.play();
   };
