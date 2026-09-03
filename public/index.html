@@ -2708,10 +2708,21 @@ body{
   box-shadow:var(--shadow-lg);
   animation:tbSay .22s cubic-bezier(.34,1.3,.64,1) both;
 }
+/* The tail. `--tb-arrow` is set from script to Tobby's own centre line, so it
+   keeps pointing at him after the bubble has been pushed sideways to stay on
+   screen — pinned at 50% it drifted off him at both window edges. */
 .tb-speech::after{
-  content:''; position:absolute; left:50%; bottom:-5px; width:9px; height:9px;
+  content:''; position:absolute; left:var(--tb-arrow, 50%); bottom:-5px;
+  width:9px; height:9px;
   transform:translateX(-50%) rotate(45deg);
   background:var(--surface); border-right:1px solid var(--border); border-bottom:1px solid var(--border);
+}
+/* Speaking downwards, when there is no room above him: the tail flips to the
+   top edge and turns over. */
+.tb-speech.below::after{
+  bottom:auto; top:-5px;
+  border-right:none; border-bottom:none;
+  border-left:1px solid var(--border); border-top:1px solid var(--border);
 }
 .tb-speech.out{animation:tbSayOut .18s ease forwards;}
 @keyframes tbSay{from{opacity:0; transform:translateY(5px) scale(.95);} to{opacity:1; transform:none;}}
@@ -12189,8 +12200,20 @@ const TobbyRig = {
         if(col > maxC) maxC = col;
       }
     }
-    const clear = ()=> ['l','t','w','h'].forEach(k=> dock.style.removeProperty('--tb-hit-'+k));
+    const clear = ()=> {
+      ['l','t','w','h'].forEach(k=> dock.style.removeProperty('--tb-hit-'+k));
+      this.drawn = null;
+    };
     if(maxR < 0){ clear(); return; }        // nothing drawn — fall back to the box
+    /* Where he actually IS, as fractions of the dock. The speech bubble needs
+       this as much as the grab handle does: anchoring to the dock's top edge
+       put the bubble a long way above a puppy, who draws 61px of a 220px box. */
+    this.drawn = {
+      top:   (c.height - 1 - maxR) / c.height,
+      bottom:(c.height - minR) / c.height,
+      left:  minC / c.width,
+      right: (maxC + 1) / c.width,
+    };
     // readPixels counts rows from the BOTTOM of the image, CSS from the top.
     const PAD = 0.07;
     const l = Math.max(0, minC / c.width - PAD);
@@ -14041,27 +14064,83 @@ function tobbyCarePanel(){
 
   draw();
 }
+/** The top of his HEAD and his centre line, in viewport pixels.
+ *
+ *  Not the dock's top edge. The dock is 190x220 and he fills between a quarter
+ *  and three-quarters of it depending on the stage, so anchoring to the box put
+ *  the bubble 90 pixels above a puppy's ears — which reads as text floating
+ *  near a dog rather than a dog talking. TobbyRig.measureHit() already reads
+ *  the drawn pixels back to size the grab handle; the same measurement gives
+ *  the head. */
+function tobbyHeadPoint(){
+  const dock = document.getElementById('tobbyDock');
+  if(!dock) return null;
+  const d = dock.getBoundingClientRect();
+  const dr = TobbyRig.ready ? TobbyRig.drawn : null;
+  if(!dr) return { top: d.top, centreX: d.left + d.width/2, bottom: d.bottom };
+  return {
+    top:     d.top + dr.top * d.height,
+    bottom:  d.top + dr.bottom * d.height,
+    centreX: d.left + (dr.left + dr.right) / 2 * d.width,
+  };
+}
+
 /** A short line over his head. Auto-dismissed; never blocks anything. */
-let tbSpeechTimer = 0;
+let tbSpeechTimer = 0, tbSpeechEl = null, tbSpeechOnResize = null;
+const TB_SPEECH_GAP = 8, TB_SPEECH_PAD = 8;
+
+function tobbyPlaceSpeech(){
+  const el = tbSpeechEl;
+  const head = tobbyHeadPoint();
+  if(!el || !head) return;
+  // offsetWidth/offsetHeight, NOT getBoundingClientRect. The bubble animates in
+  // with a scale and a translate, and the rect reports the transformed box — so
+  // measuring it during those 220ms places the bubble against a size it is not
+  // going to keep. These two are layout values and ignore transforms.
+  const w = el.offsetWidth, h = el.offsetHeight;
+  let left = head.centreX - w/2;
+  left = Math.max(TB_SPEECH_PAD, Math.min(left, innerWidth - w - TB_SPEECH_PAD));
+  let top = head.top - h - TB_SPEECH_GAP;
+  let below = false;
+  // Dragged to the top of the window, or a very short one: speak downwards
+  // rather than off the screen.
+  if(top < TB_SPEECH_PAD){ top = head.bottom + TB_SPEECH_GAP; below = true; }
+  el.style.left = left + 'px';
+  el.style.top  = top + 'px';
+  el.classList.toggle('below', below);
+  // The tail stays on HIM after the bubble has been clamped sideways, which is
+  // the whole point of it being a tail.
+  el.style.setProperty('--tb-arrow',
+    Math.max(12, Math.min(head.centreX - left, w - 12)) + 'px');
+}
+
 function tobbySay(text, ms){
   if(!text) return;
   document.querySelectorAll('.tb-speech').forEach(e=> e.remove());
-  const dock = document.getElementById('tobbyDock');
-  if(!dock) return;
+  if(!document.getElementById('tobbyDock')) return;
   const el = document.createElement('div');
   el.className = 'tb-speech';
   el.textContent = text;
   document.body.appendChild(el);
-  const d = dock.getBoundingClientRect();
-  const w = el.offsetWidth, h = el.offsetHeight;
-  el.style.left = Math.max(8, Math.min(d.left + d.width/2 - w/2, innerWidth - w - 8)) + 'px';
-  el.style.top  = Math.max(8, d.top - h - 10) + 'px';
+  tbSpeechEl = el;
+  tobbyPlaceSpeech();
+  // He can be dragged, the window can be resized, and the dock moves between
+  // the desktop corner and the mobile bar. The old build measured once and
+  // left the bubble behind.
+  removeEventListener('resize', tbSpeechOnResize);
+  tbSpeechOnResize = ()=> tobbyPlaceSpeech();
+  addEventListener('resize', tbSpeechOnResize);
   clearTimeout(tbSpeechTimer);
   tbSpeechTimer = setTimeout(()=>{
     el.classList.add('out');
-    setTimeout(()=> el.remove(), 220);
+    setTimeout(()=>{
+      el.remove();
+      if(tbSpeechEl === el){ tbSpeechEl = null; removeEventListener('resize', tbSpeechOnResize); }
+    }, 220);
   }, ms || 3200);
 }
+/** Is he mid-sentence? Used to stop timers talking over a fresh line. */
+function tobbySpeaking(){ return !!tbSpeechEl && !!tbSpeechEl.parentNode; }
 /** Six sparks off the top of him. Deliberately small: the brief asks for a
  *  moment, not a mobile-game popup. */
 function tobbySparks(n, opt){
