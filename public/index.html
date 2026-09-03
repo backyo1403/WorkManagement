@@ -2728,6 +2728,26 @@ body{
 @keyframes tbSay{from{opacity:0; transform:translateY(5px) scale(.95);} to{opacity:1; transform:none;}}
 @keyframes tbSayOut{to{opacity:0; transform:translateY(-4px);}}
 :root:not([data-motion="full"]) .tb-speech{animation:none;}
+/* The size slider in Settings. The app had no range input anywhere until now,
+   so this is the whole of its styling. */
+.tb-range{display:flex; align-items:center; gap:12px;}
+.tb-range input[type=range]{
+  flex:1; -webkit-appearance:none; appearance:none; height:4px; border-radius:2px;
+  background:var(--border-strong); outline:none; cursor:pointer;
+}
+.tb-range input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none; width:16px; height:16px; border-radius:50%;
+  background:var(--brand); border:2px solid var(--surface); box-shadow:var(--shadow); cursor:grab;
+}
+.tb-range input[type=range]::-moz-range-thumb{
+  width:16px; height:16px; border-radius:50%; border:2px solid var(--surface);
+  background:var(--brand); box-shadow:var(--shadow); cursor:grab;
+}
+.tb-range input[type=range]:focus-visible{outline:2px solid var(--brand); outline-offset:3px;}
+.tb-range b{
+  min-width:54px; text-align:right; font-size:12.5px; font-weight:700;
+  font-variant-numeric:tabular-nums; color:var(--text);
+}
 /* Evolution sparks. Six small squares, in his own pixel idiom, gone in a
    second — a moment, not a fanfare. */
 .tb-spark{
@@ -2936,9 +2956,14 @@ body{
      and he stood there with no paws. */
   position:fixed; bottom:26px; left:0; z-index:130;
   /* His size lives here and nowhere else. Everything that needs to know reads
-     offsetWidth/offsetHeight, so this is the only number to change. */
-  --tb-w:190px; --tb-h:220px;
-  width:var(--tb-w); height:var(--tb-h); pointer-events:none;
+     offsetWidth/offsetHeight, so this is the only number to change.
+     --tb-scale is the user's own multiplier from Settings, 0.5 to 1.5. It is
+     applied to the box rather than as a transform so the renderer gets a real
+     canvas at the new size instead of a blurred upscale of the old one. */
+  --tb-w:190px; --tb-h:220px; --tb-scale:1;
+  width:calc(var(--tb-w) * var(--tb-scale));
+  height:calc(var(--tb-h) * var(--tb-scale));
+  pointer-events:none;
   /* No transition on `left` here. render() rebuilds the shell on every page
      change, so the dock is a new element starting at left:0 and only then put
      back in its corner — with a transition on the property, that replacement
@@ -11010,6 +11035,8 @@ function settingsAmbiencePanel(){
   const wOn = weatherEnabled();
   const sOn = !STATE.settings || STATE.settings.sound !== false;
   const cOn = !STATE.settings || STATE.settings.combo !== false;
+  const tOn = tobbyEnabled();
+  const tSc = tobbyScale();
   return `<div class="card" style="max-width:520px;margin-bottom:16px;">
     <h3>🌦️ Hiệu ứng thời tiết</h3>
     <div style="font-size:12.5px;color:var(--text-2);margin-bottom:12px;line-height:1.55;">
@@ -11060,6 +11087,22 @@ function settingsAmbiencePanel(){
       <button class="pill-toggle ${sOn?'active':''}" data-sound-set="1">Bật</button>
       <button class="pill-toggle ${!sOn?'active':''}" data-sound-set="0">Tắt</button>
     </div>
+  </div>
+  <div class="card" style="max-width:520px;margin-bottom:16px;">
+    <h3>🐶 Tobby</h3>
+    <div style="font-size:12.5px;color:var(--text-2);margin-bottom:12px;line-height:1.55;">
+      Bạn đồng hành 3D ở góc phải dưới. Tắt đi thì Tobby biến mất hoàn toàn —
+      không lời thoại, không nhắc việc, không chiếm chỗ.
+    </div>
+    <div class="pill-toggle-row" style="margin-bottom:14px;">
+      <button class="pill-toggle ${tOn?'active':''}" data-tobby-set="1">Bật</button>
+      <button class="pill-toggle ${!tOn?'active':''}" data-tobby-set="0">Tắt</button>
+    </div>
+    ${tOn?`<div style="font-size:12px;color:var(--text-3);margin-bottom:8px;">Kích thước — nhỏ nhất 0,5×, lớn nhất 1,5× so với cỡ chuẩn</div>
+    <div class="tb-range">
+      <input type="range" id="tobbyScale" min="0.5" max="1.5" step="0.05" value="${tSc}">
+      <b id="tobbyScaleVal">${tSc.toFixed(2)}×</b>
+    </div>`:''}
   </div>
   <div class="card" style="max-width:520px;">
     <h3>🔥 Chuỗi hoàn thành (Combo)</h3>
@@ -11300,6 +11343,23 @@ function wireSettings(){
     STATE.settings.combo = el.dataset.comboSet === '1';
     persist(); renderView();
   });
+  document.querySelectorAll('[data-tobby-set]').forEach(el=> el.onclick = ()=>{
+    STATE.settings.tobby = el.dataset.tobbySet === '1';
+    persist(); renderView(); tobbyApplyPrefs();
+  });
+  const tsc = document.getElementById('tobbyScale');
+  if(tsc){
+    // Live on `input`, saved on `change`: dragging should show the new size as
+    // it happens, but writing to storage on every pixel of the drag is waste.
+    const label = document.getElementById('tobbyScaleVal');
+    tsc.oninput = ()=>{
+      const v = Number(tsc.value);
+      if(label) label.textContent = v.toFixed(2) + '×';
+      STATE.settings.tobbyScale = v;
+      tobbyApplyPrefs();
+    };
+    tsc.onchange = ()=>{ STATE.settings.tobbyScale = Number(tsc.value); persist(); };
+  }
   const cd = document.getElementById('comboDemo');
   if(cd) cd.onclick = ()=> showComboBanner(3);
   document.querySelectorAll('[data-set-lang]').forEach(el=> el.onclick = ()=> setLang(el.dataset.setLang));
@@ -12557,7 +12617,14 @@ const TobbyBrain = {
     if(!this.sleeping) return;
     this.sleeping = false;
     TobbyAnim.playAction('Tobby_WakeUp');
-    setTimeout(()=> this.relax(), 2400);
+    setTimeout(()=>{
+      // Stand him up explicitly. relax() cannot do it: Tobby_Sleep is in
+      // TB_POSTURE, the set of clips a mood is not allowed to replace, which is
+      // right while he IS asleep and wrong the moment he is not — he woke up,
+      // played the waking clip, and then lay back down for ever.
+      TobbyAnim.setBase('Tobby_Idle');
+      this.relax();
+    }, 2400);
   },
   yawn(){    this.feel('yawning', 1400); TobbyAnim.playAction('Tobby_Yawn'); },
   stretch(){ TobbyAnim.playAction('Tobby_Stretch'); },
@@ -14167,6 +14234,41 @@ function tobbyCarePanel(){
 
   draw();
 }
+
+/* ---------- Tobby's own settings ----------
+   Two of them: whether he is here at all, and how big. Both live in
+   STATE.settings beside the sound and weather switches, because they are the
+   same kind of thing — a preference about the room, not data about the work. */
+const TB_SCALE_MIN = 0.5, TB_SCALE_MAX = 1.5;
+function tobbyEnabled(){ return !STATE.settings || STATE.settings.tobby !== false; }
+function tobbyScale(){
+  const v = STATE.settings && Number(STATE.settings.tobbyScale);
+  if(!v || !isFinite(v)) return 1;
+  return Math.min(TB_SCALE_MAX, Math.max(TB_SCALE_MIN, v));
+}
+
+/** Push both settings at the DOM. Called on every render and whenever either
+ *  one changes. */
+function tobbyApplyPrefs(){
+  const dock = document.getElementById('tobbyDock');
+  if(!dock) return;
+  const on = tobbyEnabled();
+  dock.style.display = on ? '' : 'none';
+  if(!on){
+    // Nothing may speak into a hidden corner.
+    document.querySelectorAll('.tb-speech, .tb-pop').forEach(e=> e.remove());
+    return;
+  }
+  dock.style.setProperty('--tb-scale', String(tobbyScale()));
+  // The canvas has to be rebuilt at the new size, and the camera re-aimed, or
+  // he keeps the old framing inside a differently sized box.
+  if(TobbyRig.ready){
+    TobbyRig.resize();
+    TobbyRig._restBox = null;
+    TobbyRig.frame();
+    TobbyBrain.restorePlace();
+  }
+}
 /** The top of his HEAD and his centre line, in viewport pixels.
  *
  *  Not the dock's top edge. The dock is 190x220 and he fills between a quarter
@@ -14688,22 +14790,113 @@ function tobbyCraving(){ return tbCraving; }
 
 /* ---------- the ticks ---------- */
 
+
+/* ---------- bedtime ----------
+   Nine at night to six in the morning. Double-click him and he wakes; leave
+   him alone for half an hour after that and he drops off again, because being
+   woken at 2am should not mean he is up until dawn.
+
+   sleep(), wake() and yawn() have existed on TobbyBrain since it was written
+   and nothing ever called them — `sleeping` could never become true, so the
+   whole branch was dead code. This is what calls them. */
+const TB_NIGHT_FROM = 21, TB_NIGHT_TO = 6;
+const TB_RESLEEP_MS = 30 * 60 * 1000;
+let tbLastActivity = Date.now();
+let tbBedtimeRunning = false;
+
+function tbIsNight(now){
+  const h = (now || new Date()).getHours();
+  return h >= TB_NIGHT_FROM || h < TB_NIGHT_TO;
+}
+/** Anything the user does counts, so the thirty minutes measures company
+ *  rather than merely elapsed time. */
+function tobbyTouchActivity(){ tbLastActivity = Date.now(); }
+
+/** He yawns first. Always — dropping straight into the sleep pose reads as a
+ *  glitch rather than as a dog getting tired. */
+function tobbyGoToSleep(){
+  if(tbBedtimeRunning || TobbyBrain.sleeping) return;
+  tbBedtimeRunning = true;
+  tobbyEmit('sleepy');                       // clip: Tobby_Yawn
+  setTimeout(()=>{
+    try{
+      tobbyEmit('sleep');
+      TobbyBrain.sleep();
+    }catch(e){}
+    tbBedtimeRunning = false;
+  }, 2600);
+}
+
+function tobbyWakeUp(){
+  if(!TobbyBrain.sleeping) return false;
+  tobbyTouchActivity();
+  TobbyBrain.wake();
+  return true;
+}
+
+/**
+ * The bedtime clock. Returns true when it has taken charge of this tick, so
+ * nothing else talks over him going to bed.
+ */
+function tobbySleepCheck(now){
+  if(!TobbyRig.ready) return false;
+  const night = tbIsNight(now);
+
+  if(!night){
+    // Morning. Waking is worth saying good morning about, once.
+    if(TobbyBrain.sleeping){
+      TobbyBrain.wake();
+      setTimeout(()=>{ try{ tobbyEmit('morning'); }catch(e){} }, 1400);
+      return true;
+    }
+    return false;
+  }
+
+  if(TobbyBrain.sleeping) return true;       // already down for the night
+  if(tbBedtimeRunning) return true;
+  // Woken during the night: half an hour of being left alone sends him back.
+  if(Date.now() - tbLastActivity < TB_RESLEEP_MS) return false;
+  tobbyGoToSleep();
+  return true;
+}
+
+/** Five in the afternoon, Monday to Friday: the end of a working day is worth
+ *  a yawn even though nobody is going to bed. */
+function tobbyAfternoonYawn(now){
+  const day = now.getDay();
+  if(day === 0 || day === 6) return false;   // not at the weekend
+  if(now.getHours() !== 17) return false;
+  const f = tbReadFlags(TB_DAY_KEY, { yawn17:false });
+  if(f.yawn17) return false;
+  f.yawn17 = true; tbWriteFlags(TB_DAY_KEY, f);
+  try{ TobbyBrain.yawn(); }catch(e){}
+  return true;
+}
 /** Twenty seconds: often enough to catch a rung and an o'clock, rare enough
  *  that nobody notices it running. */
 function tobbyTick(){
-  if(!TobbyRig.ready || document.hidden) return;
+  if(!TobbyRig.ready || document.hidden || !tobbyEnabled()) return;
   // He does not talk over himself, and nothing is consumed while he is busy.
   if(tobbySpeaking() || TobbyAnim.actionName) return;
 
   const now = new Date();
+
+  // Bedtime outranks everything: a dog being put to bed should not be
+  // interrupted to be told about a deadline.
+  if(tobbySleepCheck(now)) return;
 
   // On the hour, once. Checked every twenty seconds so a laptop that wakes at
   // :00:45 still gets it.
   if(now.getMinutes() === 0 && tbLastHourSaid !== now.getHours()){
     tbLastHourSaid = now.getHours();
     tobbyEmit('time_hourly', { vars:{ h: now.getHours() } });
+    // ...and a stretch once the words have landed. Announcing the hour and
+    // stretching in the same instant would fight each other for his body.
+    setTimeout(()=>{ try{ TobbyBrain.stretch(); }catch(e){} }, 1500);
     return;
   }
+
+  if(tobbyAfternoonYawn(now)) return;
 
   if(tobbyWeatherGreet()) return;
 
@@ -14833,6 +15026,8 @@ function wireTobbyStage(){
      window left him there until the next render. Measured on Vercel: dock at
      left 0 from 381ms to 1366ms. The dock has its size from CSS, so placing it
      needs no model at all. */
+  try{ tobbyApplyPrefs(); }catch(e){}
+  if(!tobbyEnabled()) return;      // switched off: nothing below need run
   try{ TobbyBrain.restorePlace(); }catch(e){}
   /* Reconcile the meal on every pass, not only on a successful first load.
      A meal is state plus a timer; neither needs WebGL, and leaving it to the
@@ -14895,7 +15090,8 @@ function wireTobbyInteraction(){
                   '.data-table, .note-card, .nav-item, [data-view], .btn, .pill-toggle, ' +
                   '.tb-pick, .sidebar, .kanban-card, .cal-pill, .task-row')) return;
     if(window.getSelection && String(window.getSelection()).length) return;
-    if(TobbyBrain.sleeping) TobbyBrain.wake();
+    tobbyTouchActivity();
+    if(TobbyBrain.sleeping) tobbyWakeUp();
     TobbyBrain.goTo(e.clientX, ()=> TobbyBrain.hop());
   };
   document.addEventListener('dblclick', tbDocDbl);
@@ -14911,6 +15107,7 @@ function wireTobbyInteraction(){
     const now = performance.now();
     if(now - lastGlance < 5000) return;
     lastGlance = now;
+    tobbyTouchActivity();
     TobbyBrain.glanceAt(e.clientX);
   };
   document.addEventListener('pointermove', tbDocMove, { passive:true });
@@ -14980,9 +15177,19 @@ function wireTobbyInteraction(){
   body.onclick = (e)=>{
     e.stopPropagation();
     if(!TobbyRig.ready) return;
+    tobbyTouchActivity();
     if(dock.dataset.justDragged){ delete dock.dataset.justDragged; return; }
-    if(TobbyBrain.sleeping){ TobbyBrain.wake(); return; }
+    if(TobbyBrain.sleeping){ tobbyWakeUp(); return; }
     TobbyBrain.play();
+  };
+  // Double-clicking HIM is the wake gesture. It is handled here rather than by
+  // the document listener, which deliberately ignores the dock — a double
+  // click on the dog means "wake up", not "run to where the dog already is".
+  body.ondblclick = (e)=>{
+    e.stopPropagation(); e.preventDefault();
+    if(!TobbyRig.ready) return;
+    tobbyTouchActivity();
+    if(!tobbyWakeUp()) tobbyEmit('double_clicked');
   };
 
   removeEventListener('resize', tbOnResizeTobby);
