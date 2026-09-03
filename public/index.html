@@ -2924,8 +2924,10 @@ body{
      that holds it — so the bottom of the render fell off the screen entirely
      and he stood there with no paws. */
   position:fixed; bottom:26px; left:0; z-index:130;
-  width:76px; height:88px; pointer-events:none;
-  display:flex; align-items:flex-end; justify-content:center;
+  /* His size lives here and nowhere else. Everything that needs to know reads
+     offsetWidth/offsetHeight, so this is the only number to change. */
+  --tb-w:190px; --tb-h:220px;
+  width:var(--tb-w); height:var(--tb-h); pointer-events:none;
   /* No transition on `left` here. render() rebuilds the shell on every page
      change, so the dock is a new element starting at left:0 and only then put
      back in its corner — with a transition on the property, that replacement
@@ -2933,22 +2935,28 @@ body{
      sets its own transition for the duration of the walk and clears it. */
 }
 .tobby-dock[data-dragging="1"]{ transition:none; }
-/* The button is the whole dock. It used to be 72x72 holding a 76x88 stage,
-   which overflowed it by sixteen pixels downward — measured on the deployed
-   build as a stage bottom sixteen pixels below the window. */
+/* The grab handle covers the DOG, not the box he is drawn in.
+   TobbyRig.measureHit() reads the drawn pixels and sets these four, so the
+   handle tracks him through every stage. It used to fill the whole dock, which
+   was tolerable while that was 76x88 and is not at 190x220 — a rectangle that
+   size in the corner of the app would quietly stop taking clicks, and most of
+   it is transparent air beside a small dog. The defaults are the full box, for
+   the moment before the first measurement. */
 .tb-body{
-  position:relative; pointer-events:auto; cursor:grab;
-  width:100%; height:100%; padding:0; border:none; background:none;
+  position:absolute; pointer-events:auto; cursor:grab;
+  left:var(--tb-hit-l, 0); top:var(--tb-hit-t, 0);
+  width:var(--tb-hit-w, 100%); height:var(--tb-hit-h, 100%);
+  padding:0; border:none; background:none;
   touch-action:none;
   -webkit-tap-highlight-color:transparent;
 }
 .tb-body:active{cursor:grabbing;}
-.tb-stage{display:block; width:100%; height:100%;}
+.tb-stage{position:absolute; inset:0; display:block; pointer-events:none;}
 .tb-stage canvas{display:block; width:100%; height:100%;}
 @media (max-width:699px){
   /* The bottom bar owns the last 62px; clearing it entirely plus the same lift
      keeps him off every nav button. */
-  .tobby-dock{bottom:94px; width:64px; height:74px;}
+  .tobby-dock{bottom:94px; --tb-w:160px; --tb-h:185px;}
 }
 @media print{ .tobby-dock{display:none !important;} }
 </style>
@@ -4724,9 +4732,11 @@ function render(){
     </div>
     <div class="main"><div class="view" id="view"></div></div>
     <div class="tobby-dock" id="tobbyDock" data-facing="right">
-      <button class="tb-body" id="tobbyBody" aria-label="Tobby">
-        <span class="tb-stage" id="tobbyStage" aria-hidden="true"></span>
-      </button>
+      <!-- The canvas is a SIBLING of the grab handle, not its child. The handle
+           is sized to the pixels he actually occupies, and a canvas inside it
+           would have been cropped to the same box. -->
+      <span class="tb-stage" id="tobbyStage" aria-hidden="true"></span>
+      <button class="tb-body" id="tobbyBody" aria-label="Tobby"></button>
     </div>
     <!-- Bottom-right corner, clear of the navigation. -->
     <div class="composer-pop" id="composerPop" hidden>
@@ -12146,6 +12156,53 @@ const TobbyRig = {
         if(Math.abs(err) > 0.004) aim(d, this._shift + err * d * Math.tan(vr));
       }
     }
+    this.measureHit();
+  },
+
+  /** Put the grab handle over the dog rather than over his whole panel.
+   *
+   *  He is drawn into a fixed box and occupies between a third and all of it
+   *  depending on the stage, so the rest is transparent air. While that box was
+   *  76x88 a button covering it was a fair trade for simple code. At 190x220 it
+   *  is a rectangle in the corner of the app that silently stops taking clicks,
+   *  most of it nowhere near him — so the handle is fitted to the pixels he
+   *  actually draws, with a small margin so he is still easy to grab.
+   *
+   *  Runs with frame(), which is to say on a stage change, a resize or the bowl
+   *  appearing — not per frame. */
+  measureHit(){
+    if(!this.renderer || !this.container) return;
+    const dock = this.container.parentNode;
+    if(!dock || !dock.classList || !dock.classList.contains('tobby-dock')) return;
+    this.renderer.render(this.scene, this.camera);
+    const c = this.renderer.domElement, gl = this.renderer.getContext();
+    const px = new Uint8Array(c.width * c.height * 4);
+    gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let minR = Infinity, maxR = -1, minC = Infinity, maxC = -1;
+    for(let r = 0; r < c.height; r++){
+      const base = r * c.width;
+      for(let col = 0; col < c.width; col++){
+        if(px[(base + col)*4 + 3] <= 16) continue;
+        if(r   < minR) minR = r;
+        if(r   > maxR) maxR = r;
+        if(col < minC) minC = col;
+        if(col > maxC) maxC = col;
+      }
+    }
+    const clear = ()=> ['l','t','w','h'].forEach(k=> dock.style.removeProperty('--tb-hit-'+k));
+    if(maxR < 0){ clear(); return; }        // nothing drawn — fall back to the box
+    // readPixels counts rows from the BOTTOM of the image, CSS from the top.
+    const PAD = 0.07;
+    const l = Math.max(0, minC / c.width - PAD);
+    const r = Math.min(1, (maxC + 1) / c.width + PAD);
+    const t = Math.max(0, (c.height - 1 - maxR) / c.height - PAD);
+    // No margin BELOW his paws. There is nothing to grab down there — that is
+    // the floor, and on mobile it is the top edge of the nav bar.
+    const b = Math.min(1, (c.height - minR) / c.height);
+    dock.style.setProperty('--tb-hit-l', (l*100).toFixed(2) + '%');
+    dock.style.setProperty('--tb-hit-t', (t*100).toFixed(2) + '%');
+    dock.style.setProperty('--tb-hit-w', ((r-l)*100).toFixed(2) + '%');
+    dock.style.setProperty('--tb-hit-h', ((b-t)*100).toFixed(2) + '%');
   },
 
   resize(){
@@ -12535,8 +12592,20 @@ const TobbyBrain = {
     if(STATE.tobby && STATE.tobby.x != null){ delete STATE.tobby.x; persist(); }
 
     const main = document.querySelector('.main') || document.getElementById('app');
-    if(main){
-      const floor = main.getBoundingClientRect().bottom;
+    let floor = main ? main.getBoundingClientRect().bottom : null;
+    /* A bar pinned across the bottom is the real floor, because the main panel
+       runs UNDERNEATH it. On mobile the nav is fixed over the last 62px and
+       `.main` still reports the full viewport height, so aligning to the panel
+       put his paws 54px inside the bar — standing in the middle of the buttons
+       rather than on the roof. Invisible at 76x88; at 190x220 he covers them. */
+    const bar = document.querySelector('.sidebar');
+    if(bar){
+      const r = bar.getBoundingClientRect();
+      if(getComputedStyle(bar).position === 'fixed' &&
+         r.bottom >= innerHeight - 4 && r.width > innerWidth * 0.6 && r.height > 20)
+        floor = (floor == null) ? r.top : Math.min(floor, r.top);
+    }
+    if(floor != null){
       // His lowest pixel sits a hair above the dock's own bottom edge — that is
       // the air TB_FEET_NDC leaves — so the dock is dropped by exactly that
       // much to land the paws on the line rather than the box.
