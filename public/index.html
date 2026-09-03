@@ -13749,7 +13749,7 @@ function tobbyAnswer(key){
   switch(key){
     case 'next': {
       const t = tobbyPickNext();
-      if(!t) return { text: L2('Không còn việc nào đang mở. Nghᢁ mᢗt lát đi.','Nothing open. Take a break.') };
+      if(!t) return { text: L2('Không còn việc nào đang mở. Nghỉ một lát đi.','Nothing open. Take a break.') };
       return { text: L2('Làm “' + t.title + '” trước.', 'Start with “' + t.title + '”.') +
         (t.deadline ? ' ' + L2('Hạn: ','Due: ') + fmtDate(t.deadline) : ''), task:t };
     }
