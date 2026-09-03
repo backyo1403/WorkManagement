@@ -13559,6 +13559,12 @@ function tobbyMealLeft(){
   const started = Date.parse(b.lastFedAt || '') || 0;
   return started ? Math.max(0, TB_BOWL_EAT_MS - (Date.now() - started)) : 0;
 }
+/** Is he ACTUALLY eating? Asked of the clock, never of a leftover flag.
+ *
+ *  `bowl.kind !== 'empty'` is not the same question and the difference is what
+ *  broke feeding: a meal whose thirty seconds ran out while the tab was shut
+ *  still answers yes to the flag for ever. */
+function tobbyIsEating(){ return tobbyMealLeft() > 800; }
 function tobbyFeed(kind){
   const bowl = tobby().bowl;
   if(kind === 'empty'){ tobbyEndMeal({ cancel:true }); return; }
@@ -13825,8 +13831,8 @@ function tobbyPanel(){
     const g = TobbyGrowth.progress();
     const T = tobby();
     const b = T.bowl;
-    const eating = b.kind !== 'empty';
-    const cur = TB_BOWL_FOODS.find(f=>f[0]===b.kind);
+    const eating = tobbyIsEating();
+    const cur = eating ? TB_BOWL_FOODS.find(f=>f[0]===b.kind) : null;
     const lent = TobbyWear.borrowed();
     pop.body.innerHTML =
         '<div class="tb-age">' +
@@ -13929,8 +13935,8 @@ function tobbyCarePanel(){
 
   function draw(){
     const T = tobby(), b = T.bowl;
-    const eating = b.kind !== 'empty';
-    const cur = TB_BOWL_FOODS.find(f=>f[0]===b.kind);
+    const eating = tobbyIsEating();
+    const cur = eating ? TB_BOWL_FOODS.find(f=>f[0]===b.kind) : null;
     const g = TobbyGrowth.progress();
     const ready = TobbyRig.ready;
     const unlocked = TobbyWear.unlocked();
@@ -13985,9 +13991,16 @@ function tobbyCarePanel(){
         '<div class="tb-sec">' + L2('Cho \u0103n','Feed') +
           (eating ? ' \u00b7 ' + L2('\u0111ang \u0103n ' + (cur?cur[2]:''), 'eating') : '') + '</div>' +
         '<div class="tb-grid">' +
+          /* NOT disabled during a meal. A disabled button fires no click at
+             all, so the press never reached tobbyFeed and nothing could be
+             said about why — and because `eating` was a stale flag rather than
+             the clock, one meal left behind by a closed tab greyed out every
+             dish permanently. Live buttons let tobbyFeed answer: it clears a
+             meal that has run out and serves the new dish, and says so when
+             one is genuinely still going. */
           TB_BOWL_FOODS.filter(f=>f[0]!=='empty').map(f=>
-            '<button class="tb-pick ' + (b.kind===f[0]?'on':'') + '" data-food="' + f[0] + '"' +
-            (eating?' disabled':'') + '><i>' + f[1] + '</i>' + esc(f[2]) + '</button>').join('') +
+            '<button class="tb-pick ' + (eating && b.kind===f[0] ? 'on' : '') +
+            '" data-food="' + f[0] + '"><i>' + f[1] + '</i>' + esc(f[2]) + '</button>').join('') +
         '</div>' +
         (eating ? '<div style="margin-top:8px;"><button class="btn btn-ghost btn-sm" data-stop>' +
           L2('D\u1eebng b\u1eefa','Stop the meal') + '</button></div>' : '') +
