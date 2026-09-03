@@ -12882,7 +12882,8 @@ const TobbyGrowth = {
     try{ tobbyEvolutionCeremony(from, s); }catch(e){ this.apply(); }
     // The speech bubble would collide with the ceremony card, so it waits
     // until the card has gone.
-    setTimeout(()=>{ try{ tobbySay(TB_L('Mình lớn rồi nè.','We grew up.'), 3200); }catch(e){} }, 4800);
+    setTimeout(()=>{ try{ tobbyEmit('evolution_done'); }catch(e){} }, 4800);
+    // ...and a beat later, the line that only makes sense once you can see him.
     tobbyRemember('CHARACTER_EVENT', TB_L('Tiến hóa thành ' + s.vi, 'Evolved into ' + s.en), { stage:s.key });
     tobbyBond(TB_BOND.MILESTONE, 'evolution');
     return s;
@@ -13096,7 +13097,12 @@ function tobbyBond(amount, why){
   persist();
   if(rose){
     tobbyRemember('CHARACTER_EVENT', TB_L('Trở thành ' + lv.vi, 'Became your ' + lv.en), { level: lv.lv });
-    try{ TobbyBrain.levelUp(); tobbySay(TB_L('Mình quý cậu hơn rồi.','We are closer now.')); }catch(e){}
+    // The top level gets its own line — reaching Best Friend and merely
+    // going up a rung should not sound the same.
+    try{
+      TobbyBrain.levelUp();
+      tobbyEmit(lv.lv >= 5 ? 'bond_best_friend' : 'bond_level_up');
+    }catch(e){}
   }
   return { level: lv, rose };
 }
@@ -13146,7 +13152,7 @@ function tobbyCheckProject(projectId){
   tobbyBond(TB_BOND.PROJECT, 'project');
   tobbyRemember('PROJECT', TB_L('Hoàn thành dự án ' + (p?p.name:''), 'Finished project ' + (p?p.name:'')),
                 { projectId, tasks: tasks.length });
-  try{ TobbyBrain.celebrate(); tobbySay(TB_L('Xong cả dự án rồi!','A whole project done!')); }catch(e){}
+  try{ tobbyEmit('project_done'); }catch(e){}
 }
 /** Focus, paid by the time actually spent. Capped, so a timer left running
  *  overnight is not worth more than a good afternoon. */
@@ -13200,7 +13206,10 @@ function tobbyWelcomeBack(){
   if(away >= 3){
     tobbyBond(TB_BOND.RETURN, 'return');
     tobbyRemember('INTERACTION', TB_L('Quay lại sau ' + Math.round(away) + ' ngày', 'Back after ' + Math.round(away) + ' days'), { away: Math.round(away) });
-    try{ TobbyBrain.feel('excited', 2600); tobbySay(TB_L('Cậu quay lại rồi!','You came back!')); }catch(e){}
+    // Three days is "you came back"; a fortnight is "I missed you".
+    try{
+      tobbyEmit(away >= 14 ? 'missed_you' : 'returned_after_days');
+    }catch(e){}
   }
 }
 /* =========================================================
@@ -13610,6 +13619,20 @@ function tobbyFeed(kind){
   TobbyBowl.apply();
   TobbyBrain.feel('happy', 1600);
   TobbyAnim.playAction('Tobby_EatFromBowl', TB_BOWL_EAT_MS);
+  /* Did you guess the dish he was thinking of? Getting it right is worth
+     saying so, and it clears the craving; getting it wrong is not a telling-off
+     and leaves him still wanting the other thing, so the next guess still
+     means something. */
+  try{
+    if(tbCraving && kind === tbCraving){
+      tobbyEmit('food_fed_correct', { text: TB_CRAVE[tbCraving].correct });
+      tbCraving = null;
+    } else if(tbCraving){
+      tobbyEmit('food_fed_other');
+    } else {
+      tobbyEmit('fed');
+    }
+  }catch(e){}
   clearTimeout(tbFeedTimer);
   tbFeedTimer = setTimeout(tobbyEndMeal, TB_BOWL_EAT_MS);
 }
@@ -13819,9 +13842,70 @@ function tobbyAnswer(key){
   }
   return { text: L2('Mình chưa hiểu ý bạn.','I did not follow that.') };
 }
+
+/* Accent-blind search over the notes already in memory.
+
+   Nobody types diacritics into a search box in a hurry, so both sides are
+   flattened before comparing and "note co hop dong" finds "Hợp đồng". */
+function tbStripVi(s){
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\u0111/g, 'd').replace(/\u0110/g, 'D')
+    .toLowerCase();
+}
+
+/* `\S` on the first character, not `.` — `.` matches a space, so "note có   "
+   parsed as a search for a single space and answered "no note contains ' '"
+   instead of "that is not a command I know". */
+const TB_NOTE_CMD = /^\s*note\s+c[oó]\s+(\S.*?)\s*$/i;
+
+function tobbyFindNotes(term, limit){
+  const q = tbStripVi(term).trim();
+  if(!q) return [];
+  const out = [];
+  const all = (STATE.notes || []).filter(n=> !n.deletedAt && !n.archived);
+  for(const n of all){
+    const title = tbStripVi(n.title);
+    const body  = tbStripVi(n.content);
+    const at = body.indexOf(q);
+    if(!title.includes(q) && at < 0) continue;
+    out.push({ id:n.id, title: n.title || TB_L('Ghi chú không tên','Untitled note'),
+               excerpt: tbExcerpt(n.content || '', at, q.length) });
+    if(out.length >= (limit || 6)) break;
+  }
+  return out;
+}
+
+/** A window of the ORIGINAL text (accents intact) around the match. Stripping
+ *  only removes combining marks, so the index maps one-to-one. */
+function tbExcerpt(content, at, len){
+  const flat = content.replace(/\s+/g,' ').trim();
+  if(at < 0) return flat.slice(0, 90) + (flat.length > 90 ? '…' : '');
+  const start = Math.max(0, at - 34), end = Math.min(content.length, at + len + 52);
+  const cut = content.slice(start, end).replace(/\s+/g,' ').trim();
+  return (start > 0 ? '…' : '') + cut + (end < content.length ? '…' : '');
+}
 /** Free text, matched against the same questions. Deliberately simple: it
  *  answers from the board or says it does not know, rather than inventing. */
 function tobbyAsk(text){
+  // The note command is checked first and on the RAW text: lower-casing it
+  // would still work, but the search term has to keep the user's own spelling
+  // for the excerpt to read back naturally.
+  const noteCmd = TB_NOTE_CMD.exec(String(text||''));
+  if(noteCmd){
+    const term = noteCmd[1];
+    const hits = tobbyFindNotes(term);
+    if(!hits.length){
+      const em = tobbyEmit('note_not_found', { vars:{ q: term } });
+      return { text: em ? em.text : TB_L("Không tìm thấy note nào.",'No notes found.') };
+    }
+    return {
+      text: TB_L('Tìm thấy ' + hits.length + ' ghi chú có “' + term + '”:',
+                 'Found ' + hits.length + ' notes with “' + term + '”:'),
+      notes: hits,
+    };
+  }
   const q = String(text||'').toLowerCase();
   const hit =
     /quá hạn|trễ|nợ|overdue|late/.test(q)          ? 'overdue' :
@@ -13874,7 +13958,13 @@ function tobbyPanel(){
           (answer.task ? '<div class="tb-answer-acts">' +
             '<button data-a="open">' + L2('M\u1edf nhi\u1ec7m v\u1ee5','Open task') + '</button>' +
             '<button data-a="focus">' + L2('B\u1eaft \u0111\u1ea7u Focus','Start focus') + '</button>' +
-          '</div>' : '') + '</div>' : '') +
+          '</div>' : '') +
+          // Note hits reuse the same button row the task answer already uses,
+          // so the panel gains an ability without gaining a look.
+          (answer.notes ? '<div class="tb-answer-acts">' + answer.notes.map(n=>
+            '<button data-note="' + esc(n.id) + '" title="' + esc(n.excerpt) + '">' +
+            esc(n.title) + '</button>').join('') + '</div>' : '') +
+          '</div>' : '') +
 
         '<div class="tb-sec">' + L2('H\u1ecfi Tobby','Ask Tobby') + '</div>' +
         '<form class="tb-ask" data-ask>' +
@@ -13924,6 +14014,12 @@ function tobbyPanel(){
       acts.querySelector('[data-a="open"]').onclick = (e)=>{ e.stopPropagation(); close(); openTaskModal(answer.task.id); };
       acts.querySelector('[data-a="focus"]').onclick = (e)=>{ e.stopPropagation(); close(); toggleTimer(answer.task.id); };
     }
+    overlay.querySelectorAll('[data-note]').forEach(b=> b.onclick = (e)=>{
+      e.stopPropagation(); close();
+      const id = b.dataset.note;
+      VIEW = 'notes'; render();
+      if(typeof openNote === 'function') openNote(id);
+    });
     overlay.querySelectorAll('[data-do]').forEach(b=> b.onclick = (e)=>{
       e.stopPropagation();
       const k = b.dataset.do;
@@ -13955,6 +14051,13 @@ function tobbyCarePanel(){
   back.style.cssText = 'font-size:20px;order:-1;';
   back.onclick = (e)=>{ e.stopPropagation(); close(); tobbyPanel(); };
   pop.el.querySelector('.tb-pop-head').prepend(back);
+
+  /* Opening the feeding panel on an empty bowl is him being asked what he
+     wants, so he answers — with a riddle, in the bubble that already exists.
+     No new button: the trigger is the panel you already opened. */
+  try{
+    if(!tobbyIsEating() && TobbyRig.ready) setTimeout(()=> tobbyAskForFood(), 260);
+  }catch(e){}
 
   function draw(){
     const T = tobby(), b = T.bowl;
@@ -14141,6 +14244,507 @@ function tobbySay(text, ms){
 }
 /** Is he mid-sentence? Used to stop timers talking over a fresh line. */
 function tobbySpeaking(){ return !!tbSpeechEl && !!tbSpeechEl.parentNode; }
+
+/* =========================================================
+   WHAT HE SAYS
+   ---------------------------------------------------------
+   One table, one dispatcher. Every line he has lives here and nowhere else, so
+   the voice cannot drift one call site at a time — which is exactly what had
+   happened: five hard-coded strings scattered through the file, with no notion
+   that a line has a mood and a clip that belong with it.
+
+   `tobbyEmit(id, opt)` runs the whole chain: pick a line (never the one it used
+   last for that event), set the face, play the clip the animator built for that
+   feeling, and put the words over his head.
+
+   XP is NOT paid out here. tobbyOnTaskDone/tobbyCheckProject/tobbyOnFocus
+   already award it against the real growth system; `xp` below is the number to
+   SHOW, and duplicating the award would quietly double everyone's score.
+   ========================================================= */
+
+/** Emotion names map to the faces TB_FACE already defines — `loving` and
+ *  `playful` have no face of their own and borrow the nearest one. */
+const TB_EMO = {
+  neutral:'idle', worried:'worried', urgent:'surprised', happy:'happy',
+  excited:'excited', proud:'proud', sleepy:'sleepy', sad:'sad',
+  loving:'happy', curious:'curious', playful:'excited',
+};
+
+const TB_DIALOGUE = {
+  /* ---- 1. Khẩn cấp ---- */
+  task_overdue:      { emo:'urgent',  clip:'Tobby_UrgentNotification', hold:4600,
+    lines:['Ơ… việc này quá hạn rồi đó.'] },
+  deadline_30m:      { emo:'urgent',  clip:'Tobby_UrgentNotification', hold:4600,
+    lines:['Chỉ còn 30 phút nữa thôi! Mình xử lý ngay nhé?'] },
+  deadline_2h:       { emo:'worried', clip:'Tobby_Worried', hold:4400,
+    lines:['Việc này sắp đến hạn rồi. Đừng để nó chạy mất nhé!'] },
+  deadline_today:    { emo:'neutral', clip:'Tobby_LookAtNotification', hold:4200,
+    lines:['Hôm nay có một việc cần hoàn thành đấy.'] },
+  multiple_urgent:   { emo:'worried', clip:'Tobby_Worried', hold:6000,
+    lines:['Có hơi nhiều việc đang cùng lúc gấp đấy… Mình nên ưu tiên một việc trước.'] },
+  project_at_risk:   { emo:'worried', clip:'Tobby_Worried', hold:5600,
+    lines:['Mình nghĩ dự án này đang có nguy cơ trễ deadline rồi.'] },
+  focus_abandoned:   { emo:'sad',     clip:'Tobby_Sad', hold:4200,
+    lines:['Ơ, mình đang tập trung mà… Sao lại dừng rồi?'] },
+
+  /* ---- 2. Nhắc việc thông minh ---- */
+  task_stale:        { emo:'curious', clip:'Tobby_Curious', hold:5000,
+    lines:['Việc này nằm đây khá lâu rồi… Mình xử lý nó hôm nay nhé?'] },
+  task_due_soon:     { emo:'neutral', clip:'Tobby_LookAtNotification', hold:4200,
+    lines:['Mình để ý thấy việc này sắp đến hạn rồi.'] },
+  task_important:    { emo:'neutral', clip:'Tobby_Curious', hold:4400,
+    lines:['Đây là một trong những việc quan trọng hôm nay đấy.'] },
+  task_new:          { emo:'curious', clip:'Tobby_LookAtNotification', hold:3800,
+    lines:['Có một việc mới dành cho bạn.'] },
+  priority_changed:  { emo:'curious', clip:'Tobby_Surprised', hold:4000,
+    lines:['Việc này vừa được nâng mức ưu tiên.'] },
+  project_changed:   { emo:'curious', clip:'Tobby_LookAtNotification', hold:4000,
+    lines:['Có một thay đổi mới trong dự án này.'] },
+
+  /* ---- 3. Khi hoàn thành ---- */
+  task_done:         { emo:'happy',   clip:'Tobby_TaskCompleted', hold:3800, xp:10,
+    lines:['Xong rồi! Một việc nữa được xử lý.'] },
+  task_done_important:{ emo:'proud',  clip:'Tobby_TaskCompleted', hold:4200, xp:20,
+    lines:['Tuyệt! Việc quan trọng này đã xong.'] },
+  project_last_task_done:{ emo:'excited', clip:'Tobby_Excited', hold:4600,
+    lines:['Khoan… vậy là xong hết rồi sao? 🎉'] },
+  project_done:      { emo:'excited', clip:'Tobby_Celebrate', hold:6000, xp:100,
+    lines:['CHÚC MỪNG! Dự án này chính thức hoàn thành!'] },
+  focus_done:        { emo:'proud',   clip:'Tobby_Proud', hold:4400,
+    lines:['Một phiên tập trung tuyệt vời! Bạn làm tốt lắm.'] },
+  multiple_done_today:{ emo:'excited', clip:'Tobby_Happy', hold:4400,
+    lines:['Hôm nay bạn đang làm việc rất hiệu quả đấy!'] },
+
+  /* ---- 4. XP / Evolution ---- */
+  xp_near_milestone: { emo:'excited', clip:'Tobby_Excited', hold:4400,
+    lines:['Chỉ còn một chút nữa thôi… Tobby sắp lớn rồi!'] },
+  xp_evolution_ready:{ emo:'curious', clip:'Tobby_Curious', hold:4600,
+    lines:['Hình như có chuyện gì đó sắp xảy ra với mình…'] },
+  evolution_done:    { emo:'proud',   clip:null, hold:4200,
+    lines:['Mình… lớn rồi!'] },
+  evolution_after:   { emo:'proud',   clip:'Tobby_Proud', hold:4200,
+    lines:['Bạn có thấy mình khác không? 😎'] },
+  bond_level_up:     { emo:'loving',  clip:'Tobby_LevelUp', hold:4400,
+    lines:['Mình nghĩ… chúng ta thân nhau hơn rồi đấy.'] },
+  bond_best_friend:  { emo:'loving',  clip:'Tobby_Happy', hold:6000,
+    lines:['Bạn biết không… Mình thật sự rất thích làm việc cùng bạn. ❤️'] },
+
+  /* ---- 5. Nhu cầu của Tobby ---- */
+  hunger_low:        { emo:'neutral', clip:'Tobby_LookAtUser', hold:3800,
+    lines:['Tobby hơi đói rồi…'] },
+  hunger_hungry:     { emo:'sad',     clip:'Tobby_Sad', hold:4200,
+    lines:['Mình nghĩ đã đến giờ ăn rồi đó. 🍖'] },
+  hunger_starving:   { emo:'sad',     clip:'Tobby_Sad', hold:5000,
+    lines:['Mình không muốn làm phiền đâu… nhưng Tobby ĐÓI.'] },
+  fed:               { emo:'happy',   clip:null, hold:3600, xp:4,
+    lines:['Ngon quá! Cảm ơn bạn!'] },
+  fed_favorite:      { emo:'excited', clip:null, hold:4000, xp:8,
+    lines:['Đúng món mình thích luôn!'] },
+  fed_too_much:      { emo:'sleepy',  clip:'Tobby_Sleepy', hold:4000,
+    lines:['Ừm… hình như mình ăn hơi nhiều rồi.'] },
+
+  /* ---- 6. Năng lượng / nghỉ ngơi ---- */
+  long_session:      { emo:'worried', clip:'Tobby_LookAtUser', hold:4600,
+    lines:['Bạn làm việc lâu rồi đấy. Nghỉ một chút nhé?'] },
+  tired:             { emo:'sleepy',  clip:'Tobby_Sleepy', hold:3800,
+    lines:['Tobby cũng hơi mệt rồi…'] },
+  sleepy:            { emo:'sleepy',  clip:'Tobby_Yawn', hold:4000,
+    lines:['Mắt mình bắt đầu díu lại rồi…'] },
+  end_of_day:        { emo:'proud',   clip:'Tobby_Proud', hold:4600,
+    lines:['Hôm nay chúng ta làm được khá nhiều việc đấy.'] },
+  sleep:             { emo:'sleepy',  clip:null, hold:4200,
+    lines:['Ngủ ngon nhé. Mai mình lại tiếp tục. 🌙'] },
+  morning:           { emo:'happy',   clip:'Tobby_WakeUp', hold:4600,
+    lines:['Chào buổi sáng! Hôm nay chúng ta làm gì trước nhỉ? ☀️'] },
+
+  /* ---- 7. Productivity ---- */
+  morning_briefing:  { emo:'happy',   clip:'Tobby_Happy', hold:6000,
+    lines:['Chào buổi sáng! Đây là những việc đáng chú ý hôm nay.'] },
+  midday_check:      { emo:'neutral', clip:'Tobby_LookAtUser', hold:4600,
+    lines:['Nửa ngày rồi! Mình đã hoàn thành được khá nhiều rồi đấy.'] },
+  overloaded_day:    { emo:'worried', clip:'Tobby_Worried', hold:6400,
+    lines:['Hôm nay có hơi nhiều việc. Mình nghĩ nên chọn vài việc quan trọng nhất thôi.'] },
+  great_day:         { emo:'excited', clip:'Tobby_Celebrate', hold:4600,
+    lines:['Wow… hôm nay bạn làm việc năng suất thật đấy!'] },
+  end_of_day_review: { emo:'neutral', clip:'Tobby_Curious', hold:6000,
+    lines:['Trước khi kết thúc ngày, mình cùng xem lại hôm nay nhé?'] },
+  streak:            { emo:'proud',   clip:'Tobby_Proud', hold:4600,
+    lines:['Bạn đã duy trì chuỗi này được {X} ngày rồi! 🔥'] },
+  new_record:        { emo:'excited', clip:'Tobby_Celebrate', hold:6000,
+    lines:['Đây là ngày làm việc tốt nhất của bạn từ trước đến giờ!'] },
+
+  /* ---- 9. Tính cách riêng ----
+     Bốn bậc im lặng của bản gốc gộp vào ba sự kiện: bậc hai và bậc ba là hai
+     câu của cùng một mức, nên chúng xoay vòng với nhau. */
+  idle_short:        { emo:'neutral', clip:'Tobby_LookAround', hold:2000,
+    lines:['…'] },
+  idle_long:         { emo:'curious', clip:'Tobby_Curious', hold:3800,
+    lines:['Bạn đang suy nghĩ à?','Mình có thể chờ.'] },
+  idle_very_long:    { emo:'playful', clip:'Tobby_LookAtUser', hold:4200,
+    lines:['Hay là… mình làm gì đó đi?'] },
+  clicked_many:      { emo:'playful', clip:null, hold:3400,
+    lines:['Bạn đang rảnh đúng không?','Mình biết bạn đang cố chọc mình.'] },
+  double_clicked:    { emo:'playful', clip:null, hold:1500,
+    lines:['Á!'] },
+  returned_after_days:{ emo:'excited', clip:'Tobby_Excited', hold:4200,
+    lines:['Bạn quay lại rồi!'] },
+  missed_you:        { emo:'loving',  clip:'Tobby_Happy', hold:4400,
+    lines:['Mình nhớ bạn đấy.'] },
+
+  /* ---- 10-13. Thời tiết, báo giờ, đố món ăn, tìm note ----
+     Câu của bốn nhóm này được ghép lúc chạy, nên `lines` chỉ là dự phòng. */
+  weather_morning:   { emo:'neutral', clip:'Tobby_LookAtUser', hold:7500,
+    lines:['Sáng nay thời tiết thế nào ấy nhỉ…'] },
+  weather_afternoon: { emo:'neutral', clip:'Tobby_LookAtUser', hold:7500,
+    lines:['Chiều nay thời tiết thế nào ấy nhỉ…'] },
+  time_hourly:       { emo:'playful', clip:null, hold:4600, lines:[
+    'Tinh tinh! {h} giờ rồi đó, thời gian trôi nhanh ghê.',
+    'Boong! {h} giờ. Tobby vừa nghe tiếng đồng hồ trong bụng kêu.',
+    '{h} giờ rồi nè! Mình đoán bạn quên nhìn đồng hồ đúng không?',
+    'Alo alo, đây là bản tin {h} giờ của Tobby, không có quảng cáo.',
+    '{h} giờ rồi. Thời gian là thứ duy nhất mình không ăn được, tiếc thật.',
+    'Tíc tắc tíc tắc… à mà thôi, {h} giờ rồi đó.',
+    'Ting! Giờ báo thức của Tobby: {h} giờ.',
+    'Ơ, {h} giờ rồi á? Mình còn tưởng mới sáng nay chứ.',
+    'Chuông giờ đây: bính boong, {h} giờ rồi nhé.',
+    '{h} giờ rồi, đuôi mình vừa vẫy một cái báo hiệu đó.',
+    'Đến giờ rồi! {h} giờ — không phải mình giục đâu, chỉ là… nhắc thôi.',
+    'Này này, {h} giờ rồi kìa. Đừng quên thời gian như quên cho Tobby ăn nhé.',
+    '{h} giờ. Tobby xin phép sủa nhẹ một tiếng: Gâu!',
+    'Cứ như mới chớp mắt mà đã {h} giờ rồi.',
+    '{h} giờ rồi đó! Đừng để đồng hồ nhanh hơn bạn nhé.',
+    'Mình vừa ngáp một cái, tỉnh dậy đã thấy {h} giờ.',
+    '{h} giờ! Nếu là bữa ăn thì chắc ngon lắm, tiếc là chỉ là… giờ thôi.',
+    'Bíp bíp, hệ thống Tobby báo: đã {h} giờ.',
+    '{h} giờ rồi, vẫy đuôi ba cái ăn mừng nào!',
+    'Ơ kìa, kim đồng hồ vừa chỉ số {h}, chắc là đúng giờ rồi đó.',
+  ] },
+  food_craving:      { emo:'curious', clip:'Tobby_Curious', hold:8000,
+    lines:['Mình đang thèm một món gì đó… bạn đoán thử xem?'] },
+  food_fed_correct:  { emo:'excited', clip:null, hold:5600, xp:8,
+    lines:['Đúng món mình thích luôn!'] },
+  food_fed_other:    { emo:'neutral', clip:null, hold:6000, xp:4, lines:[
+    'Ưm… cũng ngon, nhưng không hẳn thứ mình đang thèm đâu. Đoán tiếp lần sau nhé!',
+    'Ăn tạm vậy đã, mình vẫn còn thèm thứ khác cơ…',
+  ] },
+  note_not_found:    { emo:'curious', clip:'Tobby_Thinking', hold:5200,
+    lines:["Mình lục khắp rồi mà không thấy note nào có '{q}' cả."] },
+};
+
+/* Câu mở đầu khi Tobby tự bắt chuyện — dùng thay giọng cảnh báo khô cứng.
+   Không phải một sự kiện riêng: `tobbyEmit(id, { opener:true })` ghép một câu
+   ở đây vào trước câu chính. */
+const TB_OPENERS = [
+  'Này… mình vừa phát hiện một chuyện.',
+  'Cho mình làm phiền bạn một chút nhé?',
+  'Mình có một đề xuất.',
+  'Mình để ý thấy bạn đang bỏ qua một việc.',
+  'Bạn muốn mình giúp chọn việc tiếp theo không?',
+  'Mình nghĩ việc này đáng để làm trước.',
+  'Có vẻ hôm nay hơi căng đấy…',
+  'Mình thấy bạn đang làm rất tốt.',
+];
+
+/** Which line each event used last, so it never repeats back to back. */
+const tbLastLine = {};
+let tbLastOpener = -1;
+
+function tbPickFrom(pool, memoKey){
+  if(!pool || !pool.length) return '';
+  if(pool.length === 1) return pool[0];
+  const prev = tbLastLine[memoKey];
+  let i = Math.floor(Math.random() * pool.length);
+  if(prev !== undefined && i === prev) i = (i + 1) % pool.length;
+  tbLastLine[memoKey] = i;
+  return pool[i];
+}
+
+/**
+ * EVENT -> EMOTION -> ANIMATION -> SPEECH.
+ *
+ * `opt.text` replaces the line outright — the weather, the food riddles and the
+ * note answer compose their own sentence and then borrow this whole chain, so
+ * they get the same face and the same bubble as everything else.
+ */
+function tobbyEmit(id, opt){
+  const def = TB_DIALOGUE[id];
+  if(!def) return null;
+  const o = opt || {};
+  let text = o.text || tbPickFrom(def.lines, id);
+  if(o.vars) text = text.replace(/\{(\w+)\}/g, (whole, k)=>
+    Object.prototype.hasOwnProperty.call(o.vars, k) ? String(o.vars[k]) : whole);
+  if(o.opener){
+    const n = TB_OPENERS.length;
+    let i = Math.floor(Math.random() * n);
+    if(i === tbLastOpener) i = (i + 1) % n;
+    tbLastOpener = i;
+    text = TB_OPENERS[i] + ' ' + text;
+  }
+  const hold = o.hold || def.hold || 4200;
+  try{
+    const mood = TB_EMO[def.emo] || 'idle';
+    TobbyBrain.feel(mood, hold);
+    // A null clip means "the mood's own posture is enough" — feel() has already
+    // chosen it, and playing a one-shot on top would fight it.
+    if(def.clip) TobbyAnim.playAction(def.clip);
+  }catch(e){}
+  try{ tobbySay(text, hold); }catch(e){}
+  return { id, text, emo:def.emo, clip:def.clip, xp:def.xp || null, hold };
+}
+
+/* =========================================================
+   WHEN HE SAYS IT
+   ---------------------------------------------------------
+   Four clocks, and one rule they all obey: he does not talk over himself. If
+   a bubble is up, the tick does nothing at all and reconsiders in twenty
+   seconds — and crucially consumes nothing, so a deadline rung is never lost
+   by arriving while a completion was still on screen.
+   ========================================================= */
+
+/** A deadline's last day, as four rungs rather than one alarm. */
+const TB_TIERS = ['none','today','soon_2h','soon_30m','overdue'];
+const TB_TIER_EVENT = {
+  today:'deadline_today', soon_2h:'deadline_2h',
+  soon_30m:'deadline_30m', overdue:'task_overdue',
+};
+
+/** Which rung a deadline is on right now. Pure function of the clock. */
+function tobbyTier(deadline, now){
+  if(!deadline) return 'none';
+  const due = new Date(deadline), at = now || new Date();
+  if(isNaN(+due)) return 'none';
+  const ms = +due - +at;
+  if(ms <= 0)              return 'overdue';
+  if(ms <= 30*60*1000)     return 'soon_30m';
+  if(ms <= 2*60*60*1000)   return 'soon_2h';
+  // Same calendar day, so "today" starts at midnight rather than 24h out.
+  if(due.toDateString() === at.toDateString()) return 'today';
+  return 'none';
+}
+
+/** Where each task's ladder has got to. Memory only: a reminder is about now,
+ *  and one that survives a reload would fire again on every visit. */
+const tbLadder = new Map();
+
+/**
+ * Advance one task and return the event to fire, or null.
+ *
+ * Only ever upward. And the deadline is part of the ladder's identity, not
+ * just the task id — push a task to next week and it is allowed to say
+ * "today" again when that day comes.
+ */
+function tobbyAdvanceLadder(task, now){
+  const tier = tobbyTier(task.deadline, now);
+  if(tier === 'none'){ tbLadder.delete(task.id); return null; }
+  const memo = tbLadder.get(task.id);
+  const same = memo && memo.deadline === task.deadline;
+  const prev = same ? memo.tier : 'none';
+  tbLadder.set(task.id, { tier, deadline: task.deadline });
+  return TB_TIERS.indexOf(tier) > TB_TIERS.indexOf(prev) ? TB_TIER_EVENT[tier] : null;
+}
+
+/* ---------- the board, read from what is already in memory ---------- */
+const TB_OVERLOAD = 8, TB_GREAT_DAY = 5, TB_MANY_URGENT = 3;
+
+function tobbyBoard(now){
+  const at = now || new Date();
+  let open = [], overdue = 0, dueToday = 0, doneToday = 0;
+  try{
+    const live = activeTasks().filter(t=> !t.archived);
+    open = live.filter(t=> t.status !== 'Hoàn thành' && !isFrozen(t));
+    overdue  = open.filter(t=> isOverdue(t)).length;
+    dueToday = open.filter(t=> isSameDay(t.deadline, at) && !isOverdue(t)).length;
+    doneToday = live.filter(t=> t.status === 'Hoàn thành' && isSameDay(t.completedAt, at)).length;
+  }catch(e){}
+  return { open, openCount:open.length, overdue, dueToday, doneToday,
+           urgent: overdue + dueToday };
+}
+
+/* ---------- once-a-day flags ----------
+   These are display state, not data: which greeting has already been given
+   today. localStorage is the right home — a database migration for a flag
+   that should not outlive clearing your browser would be the wrong trade. */
+const TB_WX_KEY = 'tobby.weatherGreet.v1';
+const TB_DAY_KEY = 'tobby.dayFlags.v1';
+
+function tbReadFlags(key, fallback){
+  try{
+    const raw = localStorage.getItem(key);
+    const v = raw ? JSON.parse(raw) : null;
+    if(!v || v.date !== tbToday()) return Object.assign({}, fallback, { date: tbToday() });
+    return Object.assign({}, fallback, v);
+  }catch(e){ return Object.assign({}, fallback, { date: tbToday() }); }
+}
+function tbWriteFlags(key, value){
+  try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){}
+}
+function tbToday(){
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+
+/* ---------- 10. the weather, twice a day ----------
+   WEATHER is already live in this app: Open-Meteo, no key, cached half an
+   hour, with a clock fallback when geolocation is refused. TobbyWear already
+   puts a raincoat on him when it rains. The only thing missing was the words. */
+const TB_WX_LINES = {
+  morning: {
+    clear: ['Sáng nay trời quang, ra ngoài chắc dễ chịu lắm.',
+            'Nắng sáng đẹp thế này, nhớ đội mũ nếu đi ngoài trời lâu nhé.'],
+    night: ['Trời còn hơi sớm và tối đó, cẩn thận đường nhé.'],
+    cloudy:['Sáng nay trời nhiều mây, không nắng gắt đâu.',
+            'Trời âm u thế này, mình thấy hơi buồn ngủ hộ bạn luôn.'],
+    wind:  ['Sáng nay gió khá to đấy, ra ngoài nhớ giữ chặt giấy tờ nhé.'],
+    rain:  ['Trời đang mưa kìa, nhớ mang áo mưa hoặc ô trước khi ra ngoài nhé!',
+            'Mưa từ sáng sớm rồi, đi lại cẩn thận đó.'],
+    storm: ['Ngoài kia có giông đấy, hạn chế ra đường nếu không thật cần thiết nhé.'],
+    snow:  ['Ơ… có tuyết? Chắc bạn đang ở xa nhà rồi, nhớ mặc thật ấm và quàng khăn trước khi ra ngoài nhé!'],
+  },
+  afternoon: {
+    clear: ['Chiều nay vẫn nắng đẹp, làm nốt vài việc rồi nghỉ ngơi nhé.'],
+    night: ['Chiều nay trời âm u, có khi lát nữa mưa đó.'],
+    cloudy:['Chiều nay trời âm u, có khi lát nữa mưa đó.'],
+    wind:  ['Gió chiều nay khá mạnh, để ý đồ đạc ngoài ban công nhé.'],
+    rain:  ['Chiều nay vẫn còn mưa, đường sẽ trơn, về cẩn thận nhé.'],
+    storm: ['Bão vẫn chưa tan, ở trong này làm việc là an toàn nhất.'],
+    snow:  ['Tuyết vẫn rơi ngoài kia kìa, áo len với khăn quàng đâu rồi?'],
+  },
+};
+const TB_WX_HOT = 33, TB_WX_COLD = 18;
+
+/** One line for the sky, plus one for the temperature when there IS one.
+ *  `temp` is null whenever geolocation was refused and the forecast fell back
+ *  to the clock — then the sky line stands alone rather than claiming a
+ *  temperature nobody measured. */
+function tobbyWeatherLine(part){
+  const w = (typeof WEATHER === 'object' && WEATHER) ? WEATHER : null;
+  if(!w || !w.kind) return null;
+  const pool = (TB_WX_LINES[part] || {})[w.kind];
+  if(!pool || !pool.length) return null;
+  let out = tbPickFrom(pool, 'wx:' + part + ':' + w.kind);
+  if(typeof w.temp === 'number'){
+    const t = Math.round(w.temp);
+    if(w.temp >= TB_WX_HOT)  out += ' Nóng ghê đó, ' + t + '°C — nhớ uống đủ nước nhé.';
+    else if(w.temp <= TB_WX_COLD) out += ' Trời lạnh, ' + t + '°C — mặc thêm áo ấm trước khi ra ngoài nhé.';
+    // Anything in between says nothing: a companion who remarks on 24°C every
+    // afternoon is a companion you mute.
+  }
+  return out;
+}
+
+/** First open of the morning, and first open of the afternoon. Never twice. */
+function tobbyWeatherGreet(){
+  const part = new Date().getHours() < 12 ? 'morning' : 'afternoon';
+  const flags = tbReadFlags(TB_WX_KEY, { morning:false, afternoon:false });
+  if(flags[part]) return false;
+  const line = tobbyWeatherLine(part);
+  if(!line) return false;              // no forecast yet — try again next tick
+  tobbyEmit(part === 'morning' ? 'weather_morning' : 'weather_afternoon', { text: line });
+  flags[part] = true;
+  tbWriteFlags(TB_WX_KEY, flags);
+  return true;
+}
+
+/* ---------- 11. the hour ---------- */
+let tbLastHourSaid = -1;
+
+/* ---------- 12. the craving ----------
+   The eight real dishes, matching TB_BOWL_FOODS so the existing feed buttons
+   need no changes at all. `empty` and `water` are not food. */
+const TB_CRAVE = {
+  kibble:  { riddle:'Bụng mình đang réo… thứ giòn giòn quen thuộc, ngày nào mình cũng ăn ấy, bạn đoán được không?',
+             correct:'Đúng luôn! Hạt quen thuộc là ngon nhất!' },
+  bone:    { riddle:'Mình đang thèm một thứ… cứng cứng, gặm cả buổi cũng chưa hết.',
+             correct:'Đúng ý mình rồi đó! Gặm đã ghê!' },
+  xoi:     { riddle:'Mình đang mơ về một món… vàng ươm, dẻo dẻo, ăn sáng là chuẩn nhất.',
+             correct:'Đúng món luôn! Ngon ơi là ngon!' },
+  veg:     { riddle:'Hôm nay mình muốn ăn gì đó… xanh xanh, khoẻ khoẻ, đổi vị một chút.',
+             correct:'Ừa đúng rồi, ăn rau cũng ngon phết!' },
+  comthit: { riddle:'Bụng đói cồn cào… mình thèm một dĩa nóng hổi, có cơm có thịt mới đã.',
+             correct:'Chuẩn luôn đó! Đúng bài cơm thịt rồi!' },
+  ga:      { riddle:'Mình đang thèm miếng gì đó… vàng giòn, cắn một miếng là mê.',
+             correct:'Trúng phóc! Gà lúc nào cũng đỉnh!' },
+  pho:     { riddle:'Mình nhớ một tô… nước dùng nóng hổi, thơm lừng, ăn vào là tỉnh cả người.',
+             correct:'Đúng tô mình thích rồi! Ngon xuất sắc!' },
+  melon:   { riddle:'Trời nóng thế này mình chỉ thèm một miếng… đỏ đỏ, mọng nước, mát rượi.',
+             correct:'Đúng luôn! Ngọt mát đúng kiểu mình thích!' },
+};
+const TB_CRAVE_KEYS = Object.keys(TB_CRAVE);
+
+/** Memory only, and deliberately so: a craving is a mood, not a record. */
+let tbCraving = null;
+
+function tobbyAskForFood(){
+  // Asking again repeats the SAME riddle. Re-rolling would make the button a
+  // lie and would let anyone keep asking until an easy dish came up.
+  if(!tbCraving){
+    const pool = TB_CRAVE_KEYS.filter(k=> k !== tbCraving);
+    tbCraving = pool[Math.floor(Math.random() * pool.length)];
+  }
+  tobbyEmit('food_craving', { text: TB_CRAVE[tbCraving].riddle });
+  return tbCraving;
+}
+function tobbyCraving(){ return tbCraving; }
+
+/* ---------- the ticks ---------- */
+
+/** Twenty seconds: often enough to catch a rung and an o'clock, rare enough
+ *  that nobody notices it running. */
+function tobbyTick(){
+  if(!TobbyRig.ready || document.hidden) return;
+  // He does not talk over himself, and nothing is consumed while he is busy.
+  if(tobbySpeaking() || TobbyAnim.actionName) return;
+
+  const now = new Date();
+
+  // On the hour, once. Checked every twenty seconds so a laptop that wakes at
+  // :00:45 still gets it.
+  if(now.getMinutes() === 0 && tbLastHourSaid !== now.getHours()){
+    tbLastHourSaid = now.getHours();
+    tobbyEmit('time_hourly', { vars:{ h: now.getHours() } });
+    return;
+  }
+
+  if(tobbyWeatherGreet()) return;
+
+  const board = tobbyBoard(now);
+
+  // Deadline ladders. One task per tick: a board with nine overdue items must
+  // not fire nine bubbles at once.
+  for(const task of board.open){
+    if(!task.deadline) continue;
+    const fire = tobbyAdvanceLadder(task, now);
+    if(fire){ tobbyEmit(fire); return; }
+  }
+
+  // Readings of the whole board, each at most once a day.
+  const f = tbReadFlags(TB_DAY_KEY,
+    { briefing:false, midday:false, review:false, overload:false, great:false });
+  const h = now.getHours();
+  const mark = (k)=>{ f[k] = true; tbWriteFlags(TB_DAY_KEY, f); };
+
+  if(!f.briefing && h >= 6 && h < 11 && board.openCount > 0){
+    tobbyEmit('morning_briefing'); mark('briefing'); return;
+  }
+  if(!f.overload && board.openCount >= TB_OVERLOAD){
+    tobbyEmit('overloaded_day', { opener:true }); mark('overload'); return;
+  }
+  if(!f.midday && h >= 12 && h < 14 && board.doneToday > 0){
+    tobbyEmit('midday_check'); mark('midday'); return;
+  }
+  if(!f.great && board.doneToday >= TB_GREAT_DAY){
+    tobbyEmit('great_day'); mark('great'); return;
+  }
+  if(!f.review && h >= 18 && board.doneToday > 0){
+    tobbyEmit('end_of_day_review'); mark('review'); return;
+  }
+  if(board.urgent >= TB_MANY_URGENT){
+    // Not flagged: this describes the board as it is now rather than a moment
+    // that has passed, so it is allowed to come back. The ladder above stops
+    // it repeating within a tick.
+    tobbyEmit('multiple_urgent', { opener:true });
+  }
+}
 /** Six sparks off the top of him. Deliberately small: the brief asks for a
  *  moment, not a mobile-game popup. */
 function tobbySparks(n, opt){
@@ -14410,6 +15014,9 @@ function wireTobbyInteraction(){
   // He ages on the wall clock and dresses for the sky. Both are cheap enough
   // to check every minute, and doing so means a machine left open overnight
   // wakes up a day older instead of waiting for a reload.
+  // Twenty seconds drives the dialogue clocks: the hour, the weather greeting,
+  // the deadline ladders and the day's readings.
+  setInterval(()=>{ try{ tobbyTick(); }catch(e){} }, 20*1000);
   setInterval(()=>{
     try{ TobbyGrowth.tick(); TobbyGrowth.check(); TobbyWear.unlocked(); TobbyWear.apply(); }catch(e){}
     // The meal watchdog. tobbyResumeMeal is idempotent and reads the clock, so
