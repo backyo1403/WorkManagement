@@ -13462,7 +13462,15 @@ const TobbyBowl = {
     if(!TobbyRig.ready) return;
     const was = TobbyRig.bowl.root.visible;
     TobbyRig.bowl.root.visible = !!on;
-    if(was !== !!on) TobbyRig.frame();
+    /* Reframe on a change, AND any time the bowl is out.
+       Reframing only on the transition assumed that a bowl already visible was
+       already framed, and that is not true: bowl_root arrives from the .glb
+       visible, so a meal restored on load turned it "on" when it was already
+       on and the camera had never counted it. Measured that way it sat at NDC
+       y -1.20, most of it below the bottom of the panel — he leans down and
+       eats something you cannot see, which looks exactly like nothing
+       happening. It is one readback, only when dinner is actually out. */
+    if(was !== !!on || on) TobbyRig.frame();
   },
   visible(){ return TobbyRig.ready && TobbyRig.bowl.root.visible; },
 
@@ -13543,10 +13551,29 @@ const TobbyBowl = {
 let tbFeedTimer = 0, tbMealResumed = false;
 /** Serve a dish and let him eat it. Not gated on the model: a meal is state, a
  *  timer and some XP, none of which need WebGL. */
+/** How much of the current meal is left, from the clock rather than from a
+ *  timer — the timer only ever lived in memory. */
+function tobbyMealLeft(){
+  const b = tobby().bowl;
+  if(b.kind === 'empty') return 0;
+  const started = Date.parse(b.lastFedAt || '') || 0;
+  return started ? Math.max(0, TB_BOWL_EAT_MS - (Date.now() - started)) : 0;
+}
 function tobbyFeed(kind){
   const bowl = tobby().bowl;
   if(kind === 'empty'){ tobbyEndMeal({ cancel:true }); return; }
-  if(bowl.kind !== 'empty') return;              // one meal at a time
+  /* One meal at a time — but only while there IS one. This used to be a bare
+     `return`, and that turned every way the state and the timer can part
+     company into the same silent dead end: the panel said "having a meal", the
+     dishes looked live, and clicking one did nothing at all, for ever. A meal
+     whose clock has run out is not a meal; clear it and serve the new dish. */
+  if(bowl.kind !== 'empty'){
+    if(tobbyMealLeft() > 800){
+      try{ toast(TB_L('Tobby đang ăn dở mà.', 'He is still eating.')); }catch(e){}
+      return;
+    }
+    tobbyEndMeal({ cancel:true });
+  }
   bowl.kind = kind;
   bowl.fedCount = (bowl.fedCount||0) + 1;
   bowl.lastFedAt = nowISO();
@@ -13591,17 +13618,22 @@ function tobbyEndMeal(opts){
  *  lived in memory, so a reload used to leave the bowl permanently mid-meal —
  *  every dish refused, and no meal running either. */
 function tobbyResumeMeal(){
-  if(tbMealResumed) return;
   const bowl = tobby().bowl;
   if(bowl.kind === 'empty'){ tbMealResumed = true; return; }
-  const started = Date.parse(bowl.lastFedAt || '') || 0;
-  const left = started ? TB_BOWL_EAT_MS - (Date.now() - started) : 0;
+  const left = tobbyMealLeft();
+  // Its clock has run out — end it, whatever anyone still believes.
   if(left <= 800){ tbMealResumed = true; tobbyEndMeal(); return; }
+  // The timer is memory-only and did not survive the reload. Re-arm it before
+  // anything else, so even a rig that never arrives cannot strand the bowl.
+  if(!tbFeedTimer) tbFeedTimer = setTimeout(tobbyEndMeal, left);
+  // The picture needs the model. If it is not here yet, leave the flag down so
+  // this runs again once it is — that is why the guard is here and not at the
+  // top of the function, which is where it used to be: a first call before the
+  // rig was ready set the flag, and the clip was then never started at all.
+  if(tbMealResumed || !TobbyRig.ready) return;
   tbMealResumed = true;
   TobbyBowl.apply();
   TobbyAnim.playAction('Tobby_EatFromBowl', left);
-  clearTimeout(tbFeedTimer);
-  tbFeedTimer = setTimeout(tobbyEndMeal, left);
 }
 /* ---------------------------------------------------------
    The panel. One window, opened by right-clicking him, reaching everything he
@@ -14098,6 +14130,19 @@ function tobbyZzz(){
 function wireTobbyStage(){
   const stage = document.getElementById('tobbyStage');
   if(!stage) return;
+  /* Put him in his corner NOW, before anything is loaded.
+     This used to wait for the rig, and the rig is a 1.4MB download: on the
+     deployed build he sat at left:0 — the far left of the window — for a full
+     second after the dashboard had painted, and any navigation during that
+     window left him there until the next render. Measured on Vercel: dock at
+     left 0 from 381ms to 1366ms. The dock has its size from CSS, so placing it
+     needs no model at all. */
+  try{ TobbyBrain.restorePlace(); }catch(e){}
+  /* Reconcile the meal on every pass, not only on a successful first load.
+     A meal is state plus a timer; neither needs WebGL, and leaving it to the
+     rig's success path meant a slow or failed load left the bowl "full" for
+     ever — which silently blocked every future feed. */
+  try{ tobbyResumeMeal(); }catch(e){}
   if(TobbyRig.ready){
     if(TobbyRig.container !== stage || TobbyRig.renderer.domElement.parentNode !== stage){
       TobbyRig.container = stage;
@@ -14275,6 +14320,11 @@ function wireTobbyInteraction(){
   // wakes up a day older instead of waiting for a reload.
   setInterval(()=>{
     try{ TobbyGrowth.tick(); TobbyGrowth.check(); TobbyWear.unlocked(); TobbyWear.apply(); }catch(e){}
+    // The meal watchdog. tobbyResumeMeal is idempotent and reads the clock, so
+    // running it on the minute ends any meal whose timer died with a closed tab
+    // or a failed load, and starts the clip for one the rig missed. Without it
+    // a single orphaned meal blocks feeding until someone clears the site data.
+    try{ tobbyResumeMeal(); }catch(e){}
   }, 60*1000);
 })();
 </script>
