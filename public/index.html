@@ -11787,6 +11787,10 @@ const TobbyRig = {
 
       this.scan();
       this.findStageRigs();
+      // Work out where the bowl has to stand at each stage while the mixer is
+      // still idle — it drives clips to measure, and doing that later would
+      // fight whatever he is doing at the time.
+      try{ TobbyBowl.calibrate(); }catch(e){}
       this.resize();
       this.ready = true; this.loading = false;
       return true;
@@ -12623,9 +12627,15 @@ function tobby(){
    Each stage has a defining trait and they are not all the same knob, which is
    why `ear` is two numbers. Measured in the file the ear hangs 0.22 down Y and
    is 0.05 x 0.12 across, so earL is LENGTH (Y) and earW is width (X and Z): a
-   teen's ears get long, not merely big. An adult's trait is the coat instead,
-   and `floof` is a fraction rather than a flag so it thickens over two stages
-   instead of appearing all at once. */
+   teen's ears get long, not merely big. The coat is the adult's trait and is a
+   FLAG, not a dial — the four younger stages have none at all.
+
+   THE HEAD GETS PROPORTIONALLY BIGGER AS THE STAGES GET SMALLER: 1.16 at
+   Puppy against 0.97 at Adult. That is deliberate and is what reads as an age
+   rather than as a scale factor, so nothing here may "normalise" it. It has a
+   consequence the rest of the code has to honour: anything standing in front
+   of him has to be pushed forward for the stages with the big heads, or the
+   muzzle goes through it. See TobbyBowl.stageZ(). */
 /** The five stages, in the shape the brief specifies: stage number, display
  *  name, and the name of the rig each one asks the GLB for. This is the only
  *  place any of it is written down — nothing below re-derives a stage from an
@@ -12641,19 +12651,24 @@ function tobby(){
 const EVOLUTION_STAGES = [
   { stage:1, name:'Tiny Puppy',  rig:'PUPPY',
     key:'tiny',  vi:'Cún sơ sinh',        en:'Tiny Puppy',  xp:0,
-    size:0.62, leg:0.72, head:1.30, earW:1.00, earL:0.80, floof:0    },
+    trait:'bé xíu',
+    size:0.58, leg:0.52, head:1.16, earW:0.78, earL:0.48, floof:0 },
   { stage:2, name:'Baby',        rig:'BABY',
     key:'baby',  vi:'Cún nhỏ',            en:'Baby',        xp:150,
-    size:0.78, leg:0.85, head:1.16, earW:1.00, earL:0.88, floof:0.15 },
+    trait:'bé, nhỉnh hơn',
+    size:0.72, leg:0.68, head:1.10, earW:0.86, earL:0.68, floof:0 },
   { stage:3, name:'Young Tobby', rig:'Young',
     key:'young', vi:'Cún lớn',            en:'Young Tobby', xp:600,
-    size:1.00, leg:1.00, head:1.00, earW:1.00, earL:1.00, floof:0.45 },
+    trait:'bản chuẩn hiện tại',
+    size:1.00, leg:1.00, head:1.00, earW:1.00, earL:1.00, floof:0 },
   { stage:4, name:'Teen Tobby',  rig:'TEEN',
     key:'teen',  vi:'Tobby thiếu niên',   en:'Teen Tobby',  xp:1800,
-    size:1.10, leg:1.06, head:0.97, earW:1.05, earL:1.40, floof:0.70 },
+    trait:'tai dài, cao ráo',
+    size:1.12, leg:1.07, head:0.99, earW:1.18, earL:1.42, floof:0 },
   { stage:5, name:'Adult Tobby', rig:'adult',
     key:'adult', vi:'Tobby trưởng thành', en:'Adult Tobby', xp:4000,
-    size:1.20, leg:1.10, head:0.95, earW:1.10, earL:1.30, floof:1.00 },
+    trait:'to, lông xù',
+    size:1.34, leg:1.14, head:0.97, earW:1.22, earL:1.30, floof:1 },
 ];
 /** The name the rest of the file has always used. Same array, not a copy. */
 const TOBBY_STAGES = EVOLUTION_STAGES;
@@ -12715,6 +12730,24 @@ const TobbyGrowth = {
       return true;
     }
 
+    this.applyBones(s);
+    tobby().stage = s.key;
+    // Anything standing in front of him has to move with the head, which does
+    // not scale with the rest of him. The bowl is the only such object today;
+    // anything added later belongs here beside it.
+    try{ TobbyBowl.placeForStage(); }catch(e){}
+    // A stage changes his SHAPE, not only his size — longer ears, shorter legs,
+    // the coat — so the cached silhouette no longer describes him and the
+    // camera would frame the previous stage's outline.
+    TobbyRig._restBox = null;
+    TobbyRig.frame();
+    return true;
+  },
+
+  /** Just the scales, for a given stage. Split out from apply() because the
+   *  bowl's calibration has to try each stage on for size without touching the
+   *  saved state or re-aiming the camera five times. */
+  applyBones(s){
     TobbyRig.root.scale.setScalar(s.size);
     const head = TobbyRig.bones.head;   if(head) head.scale.setScalar(s.head);
     // Ears are two knobs, as the rig names them. Length runs down Y; width is
@@ -12739,14 +12772,8 @@ const TobbyGrowth = {
       const b = TobbyRig.bones[n];
       if(b) b.scale.set(1, 1, 1);
     });
-    // The extra coat only fills in once he is grown.
+    // The coat is the adult's alone: a flag, not a dial.
     TobbyRig.floof.forEach(g=> g.scale.setScalar(s.floof));
-    tobby().stage = s.key;
-    // A stage changes his SHAPE, not only his size — longer ears, shorter legs,
-    // a thicker coat — so the cached silhouette no longer describes him and the
-    // camera would frame the previous stage's outline.
-    TobbyRig._restBox = null;
-    TobbyRig.frame();
     return true;
   },
   /** Called on the clock. An actual change of stage is an event worth seeing. */
@@ -13175,6 +13202,11 @@ const TobbyWear = {
    volume the kibble occupies so they land where the eating animation expects
    food to be.
    ========================================================= */
+/* Breathing room in front of his chin, in the bowl's own units. Small on
+   purpose: the eating clip is authored for a bowl where the artist put it, so
+   the bowl can be nudged out of his face but not walked away from him. At this
+   value his muzzle still enters the basin by more than 90mm at every stage. */
+const TB_BOWL_CLEAR = 0.014;
 const TB_BOWL_EAT_MS = 30000;
 const TB_BOWL_XP = 5;
 const TB_BOWL_CLAY = '#B4562C';
@@ -13188,10 +13220,12 @@ const TB_BOWL_FOODS = [
   ['comthit', '🍛', 'Cơm thịt',  [[0xF3EEE2,18,0.70,0.34,0.52],[0x8A4A24, 8,0.46,0.40,0.84]]],
   ['ga',      '🍗', 'Thịt gà',   [[0xD79A46,10,0.56,0.48,0.58],[0xA9642A, 6,0.42,0.38,0.86]]],
   ['pho',     '🍜', 'Phở',       [[0xC9A24B, 1,0.00,1.80,0.30],[0xF4EFE0,14,0.62,0.26,0.54],[0x7A4526,6,0.46,0.34,0.74]]],
+  ['melon',   '🍉', 'Dưa hấu',   [[0xE0455B,11,0.60,0.44,0.56],[0x3E8F5A, 6,0.52,0.30,0.86],[0x1F1F1F,3,0.34,0.16,0.72]]],
 ];
 const TB_BOWL_COLORS = [
   [TB_BOWL_CLAY,'Đất nung'], ['#C0483A','Đỏ gạch'], ['#2E7BC4','Xanh dương'],
-  ['#3E8F5A','Xanh lá'],     ['#E0A33A','Vàng'],    ['#7C5CBF','Tím'], ['#4A5568','Xám'],
+  ['#3E8F5A','Xanh lá'],     ['#E0A33A','Vàng'],    ['#7C5CBF','Tím'],
+  ['#D96A8E','Hồng'],        ['#E5D9BE','Kem'],     ['#4A5568','Xám đá'], ['#33363D','Than'],
 ];
 
 const TobbyBowl = {
@@ -13231,6 +13265,126 @@ const TobbyBowl = {
       ? { r:0.10, floor:0.04, top:0.16 }
       : { r: Math.max(size.x, size.z)*0.5, floor: box.min.y, top: box.max.y };
     return this.fit;
+  },
+
+  baseZ:null, rim:null, fwd:null,
+
+  /* Poses the bowl has to survive. Not an arbitrary list: these are the ones
+     that put his face out over the floor, and Sleep is the worst of them at
+     every single stage. Eating is deliberately absent — his muzzle is SUPPOSED
+     to go into the basin, and including it would push the bowl out of reach. */
+  CLEAR_POSES: ['Tobby_Sleep','Tobby_Play','Tobby_Sit','Tobby_Idle','Tobby_Stretch','Tobby_Yawn'],
+
+  /** How far forward his face actually gets, per stage — measured, not modelled.
+   *
+   *  Two things push his chin out and they do not move together. The head has
+   *  its own scale, which runs OPPOSITE to his size (1.16 on a puppy, 0.97 on
+   *  an adult), so the smallest stages reach furthest relative to their bodies.
+   *  And the adult's coat adds `floof_crown`, a tuft that sits on TOP of his
+   *  head while he stands and becomes the furthest-forward point on the whole
+   *  dog once he lies down and drops his chin.
+   *
+   *  I tried to predict both with a formula and it was wrong twice: measuring
+   *  the head's forward extent in the rest pose said the coat contributed
+   *  nothing (in that pose it doesn't), and the adult still clipped the bowl.
+   *  Sampling the poses that actually reach settles it in one pass and needs no
+   *  theory about which knob does what.
+   *
+   *  Runs once, at load, before any clip is playing. */
+  calibrate(){
+    const rig = TobbyRig, T = rig.THREE;
+    const br = rig.bowl && rig.bowl.root, head = rig.bones && rig.bones.head;
+    if(this.fwd || !br || !br.parent || !head || !rig.mixer) return this.fwd;
+    if(typeof EVOLUTION_STAGES === 'undefined') return null;
+    this.baseZ = br.position.z;
+    const toLocal = ()=> new T.Matrix4().copy(br.parent.matrixWorld).invert();
+
+    // The near rim, relative to bowl_root's own origin, so the clearance below
+    // is measured against the lip he would actually hit.
+    rig.root.updateMatrixWorld(true);
+    const bb = new T.Box3();
+    br.traverse(m=>{ if(m.isMesh && m.geometry){
+      m.geometry.computeBoundingBox();
+      bb.union(m.geometry.boundingBox.clone().applyMatrix4(m.matrixWorld)); }});
+    this.rim = bb.isEmpty() ? 0 : (br.position.z - bb.clone().applyMatrix4(toLocal()).min.z);
+
+    const saved = [];
+    rig.root.traverse(o=> saved.push([o, o.scale.clone()]));
+    const fwd = {};
+    try{
+      for(const s of EVOLUTION_STAGES){
+        TobbyGrowth.applyBones(s);
+        let worst = -Infinity;
+        for(const cn of this.CLEAR_POSES){
+          const clip = rig.clips[cn];
+          if(!clip) continue;
+          rig.mixer.stopAllAction();
+          const a = rig.mixer.clipAction(clip);
+          a.reset(); a.play();
+          for(let i = 0; i <= 12; i++){
+            rig.mixer.setTime(i * clip.duration / 12);
+            rig.root.updateMatrixWorld(true);
+            const b = new T.Box3();
+            head.traverse(m=>{
+              if(!m.isMesh || !m.geometry || m.scale.x === 0) return;
+              m.geometry.computeBoundingBox();
+              b.union(m.geometry.boundingBox.clone().applyMatrix4(m.matrixWorld));
+            });
+            if(b.isEmpty()) continue;
+            const z = b.applyMatrix4(toLocal()).max.z;
+            if(z > worst) worst = z;
+          }
+          a.stop();
+        }
+        if(worst > -Infinity) fwd[s.key] = worst;
+      }
+    }catch(e){ /* a rig without these clips simply keeps the authored place */ }
+    rig.mixer.stopAllAction();
+    saved.forEach(([o,v])=> o.scale.copy(v));
+    rig.root.updateMatrixWorld(true);
+    this.fwd = Object.keys(fwd).length ? fwd : null;
+    return this.fwd;
+  },
+
+  /** How far in front of him the bowl has to stand for the stage he is at.
+   *
+   *  A stage does not scale him uniformly: the head has its own multiplier and
+   *  it runs the OTHER WAY from his size — 1.16 on a puppy against 0.97 on an
+   *  adult, because a big head on a small body is what reads as young. So the
+   *  smaller he gets, the further his muzzle reaches forward relative to
+   *  everything else, and a bowl left where the artist put it is a bowl his
+   *  face goes through.
+   *
+   *  bowl_root is a sibling of ROOT, so its position and the head's reach are
+   *  in the same frame and the whole correction is one term:
+   *
+   *      z = authored + (head - 1) x reach
+   *
+   *  `reach` is the head's own forward extent from its pivot, measured off the
+   *  model at head-scale 1 so it describes the rig rather than whichever stage
+   *  happened to be showing when it was first asked for. At head 1 this gives
+   *  back exactly what the artist authored, which is the right answer for
+   *  Young by construction.
+   *
+   *  This holds while he leans, too: the lean is a rotation of the neck and
+   *  spine about a pivot the head hangs off, so the extra reach it produces
+   *  scales with the same `head` factor the correction is built from. */
+  stageZ(){
+    const br = TobbyRig.bowl && TobbyRig.bowl.root;
+    if(!br) return null;
+    if(this.fwd == null) this.calibrate();
+    const f = this.fwd && this.fwd[TobbyGrowth.current().key];
+    // No calibration (a rig missing those clips, say) means leaving the bowl
+    // exactly where the artist put it, which is never worse than guessing.
+    if(f == null) return this.baseZ;
+    return f + this.rim + TB_BOWL_CLEAR;
+  },
+
+  /** Put it there. Called on every stage change, and cheap enough to be. */
+  placeForStage(){
+    const z = this.stageZ();
+    if(z != null) TobbyRig.bowl.root.position.z = z;
+    return z;
   },
 
   /** Showing or hiding the bowl changes what has to be in shot, so the camera
