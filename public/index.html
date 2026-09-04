@@ -1754,12 +1754,11 @@ body.is-login .weather-layer{display:none;}
 .cl .ln{flex:0 0 auto; width:3.2em; margin-right:1.1em; text-align:right;
   color:var(--cd-gutter); user-select:none; -webkit-user-select:none;}
 .cl .lc{flex:1 1 auto; min-width:0; overflow:hidden;}
-/* The prompt lines are the live part of the page, so they get the only
-   emphasis on screen: a hairline rule and a fractionally lighter ground. */
-.code-repl{background:rgba(255,255,255,.028);
-  border-top:1px solid rgba(255,255,255,.06); border-bottom:1px solid rgba(255,255,255,.06);
-  padding:6px 0;}
-.cl:focus-within{background:rgba(92,207,230,.07);}
+/* The prompt lines carry no panel of their own — no ground, no rules, no
+   padding. A tinted block behind them is a form pretending to be code, and it
+   was visible as a raised slab across ten lines whether or not anything was
+   focused. The caret is the whole of the feedback, which is what it is in an
+   editor. The <form> stays; it just has nothing to say visually. */
 /* The field is a run of text in the listing, not a box laid over it. Every
    border, shadow and background the browser would give an input is removed,
    and what the user types is coloured as a string literal.
@@ -1805,6 +1804,10 @@ body.is-login .weather-layer{display:none;}
 .cd-a{color:var(--cd-attr);}    .cd-b{color:var(--cd-bi);}
 .cd-o{color:var(--cd-op);}      .cd-d{color:var(--cd-kw);}
 .cd-v{color:var(--cd-txt);}     /* a plain name — variables, parameters */
+/* A stored module-level value. Deliberately the attribute cyan and not the
+   constant yellow: these two names sit directly against a yellow string
+   literal, and two yellows touching read as one smear. */
+.cd-g{color:var(--cd-attr);}
 .cd-p{color:var(--cd-bi);}      /* the >>> prompt */
 .cd-err{color:var(--cd-kw); font-weight:600;}
 .login-error{background:var(--danger-soft); color:var(--danger); border-radius:9px; padding:9px 12px;
@@ -4500,16 +4503,20 @@ function viewLogin(){
     raw(prompt('import bachoffice.auth as auth')) +
     raw(prompt('gate = auth.SessionGate(node="workstation-07")')) +
     raw(prompt('gate.authenticate()')) +
-    raw(sp('c', '[Bach Office] đang chờ thông tin đăng nhập…')) +
     // Two assignments with an empty string on the right, and the field is what
     // goes between the quote marks. So the quotes are drawn either side of the
     // input and the input is sized from its own value — see wireLogin — or the
     // closing quote would sit stranded out in the whitespace.
-    raw(sp('v', 'stored_username') + sp('o', ' = ') + sp('s', '"') +
+    //
+    // The two names carry the store colour rather than the plain-variable one.
+    // They are module-level things holding a value, like AUDIT_LOG above, and
+    // now that the lines have no panel behind them the colour is also what
+    // makes them findable in a screen of grey-white code.
+    raw(sp('g', 'stored_username') + sp('o', ' = ') + sp('s', '"') +
         '<input id="login_user" type="text" autocomplete="username" ' +
         'autocapitalize="off" autocorrect="off" spellcheck="false" ' +
         'enterkeyhint="go" aria-label="Tên đăng nhập">' + sp('s', '"')) +
-    raw(sp('v', 'stored_passcode') + sp('o', ' = ') + sp('s', '"') +
+    raw(sp('g', 'stored_passcode') + sp('o', ' = ') + sp('s', '"') +
         '<input id="login_pass" type="password" autocomplete="current-password" ' +
         'enterkeyhint="go" aria-label="Mật khẩu">' + sp('s', '"')) +
     // A traceback rather than a banner. Same message, same trigger — only the
