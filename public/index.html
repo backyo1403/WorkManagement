@@ -1731,21 +1731,24 @@ a{color:inherit;}
   --cd-bi:#5ccfe6;      /* builtins and modules                  */
   --cd-op:#8a94a6;      /* punctuation                           */
   --cd-accent:#5ccfe6;  /* the caret                             */
-  height:100vh; height:100dvh; width:100%; overflow:hidden;
+  /* The file is longer than the window and scrolls, like any file open in an
+     editor. #app is a fixed-height flex row with overflow hidden, so the
+     scrolling has to happen in here rather than on the document. */
+  height:100vh; height:100dvh; width:100%; overflow-y:auto; overflow-x:hidden;
   background:var(--cd-bg); color:var(--cd-txt);
   font-family:'SF Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
   font-size:13px; line-height:1.72; letter-spacing:.01em;
-  /* Three bands: filler, the prompt, filler. The prompt keeps its natural
-     height and the two fillers absorb whatever is left, so the fields sit at
-     the middle of any viewport and the listing simply gets clipped around
-     them — never the other way round. */
-  display:flex; flex-direction:column; justify-content:center;
+  padding-block:10px;
 }
+body.is-login #app{display:block;}
+/* The header above the prompt is kept short on purpose: it is what decides
+   whether the two fields are on screen before anyone scrolls. Everything long
+   goes below them, where scrolling is the point. */
+.code-login::-webkit-scrollbar{width:10px;}
+.code-login::-webkit-scrollbar-thumb{background:#232b38; border-radius:6px;}
+.code-login::-webkit-scrollbar-track{background:transparent;}
 /* Nothing moves on this screen, including the things that are not part of it. */
 body.is-login .weather-layer{display:none;}
-.code-fill{flex:1 1 0; min-height:0; overflow:hidden;}
-.code-fill.above{display:flex; flex-direction:column; justify-content:flex-end;}
-.code-repl{flex:0 0 auto;}
 /* One line of the listing: gutter, then the code itself. */
 .cl{display:flex; align-items:baseline; white-space:pre; padding:0 18px;}
 .cl .ln{flex:0 0 auto; width:3.2em; margin-right:1.1em; text-align:right;
@@ -1759,12 +1762,25 @@ body.is-login .weather-layer{display:none;}
 .cl:focus-within{background:rgba(92,207,230,.07);}
 /* The field is a run of text in the listing, not a box laid over it. Every
    border, shadow and background the browser would give an input is removed,
-   and what the user types is coloured as a string literal. */
+   and what the user types is coloured as a string literal.
+   The width is set from the value in JS rather than fixed here, because the
+   field sits BETWEEN the two quote marks of a string literal: a fixed width
+   would leave the closing quote stranded out in the whitespace. */
 .code-repl input{
   font:inherit; letter-spacing:inherit; color:var(--cd-str);
   background:transparent; border:0; outline:0; box-shadow:none; border-radius:0;
-  padding:0; margin:0; width:min(26ch, 46vw); caret-color:var(--cd-accent);
+  padding:0; margin:0; vertical-align:baseline;
+  width:0; max-width:38vw; caret-color:var(--cd-accent);
 }
+/* The two assignment lines are the click target for their own field, since the
+   field itself is nothing but a caret until something is typed into it. */
+.code-repl .cl:has(input){cursor:text;}
+/* An empty field is zero characters wide so the line reads "" and not " ".
+   Once it has the caret it opens by one character to hold it. Done in CSS
+   rather than on focus/blur events because the state is the state — there is
+   nothing to keep in sync, and it still applies in the cases where a focus
+   event never arrives (a window that is not the frontmost one, for instance). */
+.code-repl .cl:focus-within input{min-width:1ch;}
 .code-repl input::placeholder{color:var(--cd-com); opacity:1;}
 /* Autofill would otherwise paint its own background and text colour straight
    over the illusion. */
@@ -1774,11 +1790,13 @@ body.is-login .weather-layer{display:none;}
   -webkit-box-shadow:0 0 0 60px var(--cd-bg) inset;
   caret-color:var(--cd-accent);
 }
-/* The submit control reads as a comment at the end of the session. It is a
-   real button so that Enter in either field submits the form the way the
-   browser does it — with two fields and no submit button, it would not. */
-.code-go{font:inherit; color:var(--cd-com); background:none; border:0; padding:0;
-  cursor:pointer; text-align:left;}
+/* The submit control is a bare # on its own line — an empty comment waiting to
+   be written. It is a real <button type="submit"> so that Enter in either
+   field submits the way the browser does it: with two fields and no submit
+   button in the form, it would not submit at all. The padding widens the click
+   target without moving the glyph off the character grid. */
+.code-go{font:inherit; color:var(--cd-com); background:none; border:0;
+  padding:0 .5em; margin-left:-.5em; cursor:pointer; text-align:left;}
 .code-go:hover, .code-go:focus-visible{color:var(--cd-accent); outline:0;}
 .cd-k{color:var(--cd-kw);}      .cd-f{color:var(--cd-fn);}
 .cd-cl{color:var(--cd-cls);}    .cd-s{color:var(--cd-str);}
@@ -1795,7 +1813,7 @@ body.is-login .weather-layer{display:none;}
   .code-login{font-size:11.5px; line-height:1.68;}
   .cl{padding:0 10px;}
   .cl .ln{width:2.4em; margin-right:.7em;}
-  .code-repl input{width:min(22ch, 52vw);}
+  .code-repl input{max-width:52vw;}
 }
 
 /* =========================================================
@@ -4238,13 +4256,16 @@ const PY_BUILTINS = new Set(['hashlib','datetime','secrets','str','int','bool','
  *  `class` (naming what follows), and whether a dot came immediately before
  *  (making the next word an attribute rather than a variable). */
 function pyLine(src){
-  const RX = /(#.*)|("""[\s\S]*?"""|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")|(\d+(?:\.\d+)?)|(@[A-Za-z_]\w*)|([A-Za-z_]\w*)|(\s+)|([\s\S])/g;
+  // The [fFrRbB]? is the string prefix. Without it the f of an f-string is one
+  // character short of a quote and matches as a word instead, so it comes out
+  // coloured as a variable sitting against a string.
+  const RX = /(#.*)|([fFrRbBuU]{0,2}(?:"""[\s\S]*?"""|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"))|(\d+(?:\.\d+)?)|(@[A-Za-z_]\w*)|([A-Za-z_]\w*)|(\s+)|([\s\S])/g;
   const put = (cls, text)=> '<span class="cd-' + cls + '">' + esc(text) + '</span>';
   let out = '', prev = '', afterDot = false, m;
   while((m = RX.exec(src)) !== null){
     const [, comment, str, num, decorator, word, ws, other] = m;
     if(comment !== undefined){ out += put('c', comment); prev=''; afterDot=false; }
-    else if(str !== undefined){ out += put(str.startsWith('"""') ? 'c' : 's', str); prev=''; afterDot=false; }
+    else if(str !== undefined){ out += put(/^[A-Za-z]*"""/.test(str) ? 'c' : 's', str); prev=''; afterDot=false; }
     else if(num !== undefined){ out += put('n', num); prev=''; afterDot=false; }
     else if(decorator !== undefined){ out += put('d', decorator); prev=''; afterDot=false; }
     else if(word !== undefined){
@@ -4269,10 +4290,16 @@ function pyLine(src){
 /* The listing itself. It is decoration, so it does not have to run — but it
    does have to survive being read, which is why it is a plausible access
    layer for this app rather than filler. */
+/* Short on purpose. This is everything that sits ABOVE the two fields, so its
+   length is what decides whether they are on screen before anyone scrolls —
+   seventeen lines clears the prompt on a 600px window. Everything long belongs
+   below, where scrolling is the point. */
 const LOGIN_CODE_ABOVE = [
   'import hashlib',
   'import secrets',
   'from datetime import datetime, timedelta',
+  '',
+  'from bachoffice import geo, http',
   '',
   'AUDIT_LOG = "bachoffice/var/session.log"',
   'MAX_ATTEMPTS = 5',
@@ -4285,6 +4312,10 @@ const LOGIN_CODE_ABOVE = [
   '        self.node = node',
   '        self.ttl = ttl',
   '        self.attempts = 0',
+];
+/* And this is the rest of the file: enough of it that the page scrolls, and
+   unfinished in the places a real one would be. */
+const LOGIN_CODE_BELOW = [
   '        self.token = None',
   '        self.opened_at = datetime.now()',
   '',
@@ -4300,9 +4331,6 @@ const LOGIN_CODE_ABOVE = [
   '        if record is None:',
   '            return False',
   '        return self._digest(password, record.salt) == record.digest',
-  '',
-];
-const LOGIN_CODE_BELOW = [
   '',
   '    def issue(self, user):',
   '        self.token = secrets.token_urlsafe(32)',
@@ -4321,6 +4349,138 @@ const LOGIN_CODE_BELOW = [
   '    def audit(self, event, user, **fields):',
   '        with open(AUDIT_LOG, "a") as fh:',
   '            fh.write(f"{datetime.now():%F %T} {event} {user}\\n")',
+  '',
+  '',
+  '# ----------------------------------------------------------------',
+  '# Ambience — trời, giờ và chỗ đang ngồi. Chưa nối vào app.',
+  '# ----------------------------------------------------------------',
+  '',
+  'FORECAST_API = "https://api.open-meteo.com/v1/forecast"',
+  'GEOCODE_API = "https://geocoding-api.open-meteo.com/v1/search"',
+  'CACHE_TTL = timedelta(minutes=30)',
+  '',
+  '',
+  'class Where:',
+  '    """Vị trí thô của máy. Chỉ dùng để hỏi thời tiết, không lưu lại."""',
+  '',
+  '    def __init__(self):',
+  '        self.lat = None',
+  '        self.lon = None',
+  '        self.place = None',
+  '        self.source = None',
+  '',
+  '    def coarse(self):',
+  '        # Hỏi trình duyệt trước; bị từ chối thì rơi về tra theo IP.',
+  '        fix = geo.browser_fix(timeout=8)',
+  '        if fix is None:',
+  '            return self.from_ip()',
+  '        self.lat = round(fix.latitude, 2)    # hai số lẻ: đủ cho thời tiết,',
+  '        self.lon = round(fix.longitude, 2)   # không đủ để lần ra nhà ai',
+  '        self.source = "gps"',
+  '        return self',
+  '',
+  '    def from_ip(self):',
+  '        self.source = "ip"',
+  '        # TODO: nhà cung cấp hiện tại hay trả sai tỉnh, tìm cái khác',
+  '        raise NotImplementedError',
+  '',
+  '    def label(self):',
+  '        if self.place:',
+  '            return self.place',
+  '        return f"{self.lat:.2f}, {self.lon:.2f}"',
+  '',
+  '',
+  'class Sky:',
+  '    """Thời tiết ngay lúc này — dùng cho nền và cho câu chào."""',
+  '',
+  '    CODES = {',
+  '        0: "quang mây",   1: "ít mây",     2: "có mây",',
+  '        3: "âm u",       45: "sương mù",  51: "mưa phùn",',
+  '       61: "mưa",        71: "tuyết",     95: "dông",',
+  '    }',
+  '',
+  '    def __init__(self, where, ttl=CACHE_TTL):',
+  '        self.where = where',
+  '        self.ttl = ttl',
+  '        self.fetched_at = None',
+  '        self.current = None',
+  '',
+  '    def stale(self):',
+  '        if self.fetched_at is None:',
+  '            return True',
+  '        return datetime.now() - self.fetched_at > self.ttl',
+  '',
+  '    def refresh(self):',
+  '        # Nửa tiếng một lần là quá đủ cho một cái nền.',
+  '        if not self.stale():',
+  '            return self.current',
+  '        payload = http.get(FORECAST_API, params={',
+  '            "latitude": self.where.lat,',
+  '            "longitude": self.where.lon,',
+  '            "current": "temperature_2m,weather_code,wind_speed_10m,is_day",',
+  '            "timezone": "auto",',
+  '        }).json()',
+  '        self.current = payload["current"]',
+  '        self.fetched_at = datetime.now()',
+  '        return self.current',
+  '',
+  '    def describe(self):',
+  '        now = self.refresh()',
+  '        text = self.CODES.get(now["weather_code"], "trời lạ")',
+  '        return f"{now[\'temperature_2m\']:.0f}°C, {text}"',
+  '',
+  '    def is_night(self):',
+  '        return not self.refresh()["is_day"]',
+  '',
+  '',
+  'class Clock:',
+  '    """Giờ của máy, và cách gọi tên các quãng trong ngày."""',
+  '',
+  '    BANDS = [(5, "khuya"), (11, "buổi sáng"), (13, "buổi trưa"),',
+  '             (18, "buổi chiều"), (22, "buổi tối")]',
+  '',
+  '    def __init__(self, tz=None):',
+  '        self.tz = tz or datetime.now().astimezone().tzinfo',
+  '',
+  '    def now(self):',
+  '        return datetime.now(self.tz)',
+  '',
+  '    def band(self):',
+  '        hour = self.now().hour',
+  '        for edge, name in self.BANDS:',
+  '            if hour < edge:',
+  '                return name',
+  '        return "khuya"',
+  '',
+  '    def greeting(self, name):',
+  '        return f"Chào {self.band()}, {name}"',
+  '',
+  '    def left_until(self, deadline):',
+  '        left = deadline - self.now()',
+  '        if left.days > 0:',
+  '            return f"còn {left.days} ngày"',
+  '        # FIXME: dưới một tiếng thì đọc ra "còn 0 giờ" — sửa sau',
+  '        return f"còn {left.seconds // 3600} giờ"',
+  '',
+  '',
+  'def paint_ambience(user):',
+  '    where = Where().coarse()',
+  '    sky = Sky(where)',
+  '    clock = Clock()',
+  '    return {',
+  '        "greeting": clock.greeting(user.short_name),',
+  '        "weather": sky.describe(),',
+  '        "place": where.label(),',
+  '        "night": sky.is_night(),',
+  '        "at": clock.now().isoformat(timespec="minutes"),',
+  '    }',
+  '',
+  '',
+  '# TODO: gọi paint_ambience() lúc mở app, hiện vẫn phải gọi tay',
+  '# TODO: nhớ vị trí người dùng chọn tay, đừng hỏi lại mỗi lần mở',
+  '# TODO: band() chưa kiểm lại khi máy đổi múi giờ giữa chừng',
+  '# TODO: Sky.refresh() nuốt lỗi mạng — ít nhất phải log một dòng',
+  '',
 ];
 
 function viewLogin(){
@@ -4341,13 +4501,17 @@ function viewLogin(){
     raw(prompt('gate = auth.SessionGate(node="workstation-07")')) +
     raw(prompt('gate.authenticate()')) +
     raw(sp('c', '[Bach Office] đang chờ thông tin đăng nhập…')) +
-    raw(sp('b', 'user') + sp('o', ': ') +
+    // Two assignments with an empty string on the right, and the field is what
+    // goes between the quote marks. So the quotes are drawn either side of the
+    // input and the input is sized from its own value — see wireLogin — or the
+    // closing quote would sit stranded out in the whitespace.
+    raw(sp('v', 'stored_username') + sp('o', ' = ') + sp('s', '"') +
         '<input id="login_user" type="text" autocomplete="username" ' +
         'autocapitalize="off" autocorrect="off" spellcheck="false" ' +
-        'enterkeyhint="go" placeholder="&lt;tên đăng nhập&gt;">') +
-    raw(sp('b', 'password') + sp('o', ': ') +
+        'enterkeyhint="go" aria-label="Tên đăng nhập">' + sp('s', '"')) +
+    raw(sp('v', 'stored_passcode') + sp('o', ' = ') + sp('s', '"') +
         '<input id="login_pass" type="password" autocomplete="current-password" ' +
-        'enterkeyhint="go" placeholder="••••••••">') +
+        'enterkeyhint="go" aria-label="Mật khẩu">' + sp('s', '"')) +
     // A traceback rather than a banner. Same message, same trigger — only the
     // way it is set is different, so that a failure looks like it came from
     // the program on screen instead of from a dialog laid over it.
@@ -4357,17 +4521,17 @@ function viewLogin(){
       raw(sp('err', loginError === 'Sai tên đăng nhập hoặc mật khẩu' ? 'AuthError' : 'SessionExpired') +
           sp('o', ': ') + sp('s', loginError))
     ) : '') +
-    // "Enter" spelled out rather than ⏎: the symbol is not in the mono faces
-    // this page asks for, so it comes from a fallback at a different advance
-    // width — off the character grid here, and a blank box on a machine with
-    // no fallback that carries it.
-    raw('<button type="submit" class="code-go" id="loginBtn">' +
-        esc('# nhấn Enter để đăng nhập') + '</button>');
+    // A bare # — an empty comment, the next line nobody has written yet. It
+    // carries no label, so the accessible name has to come from the attribute
+    // rather than from the text a screen reader would otherwise announce as
+    // "number sign".
+    raw('<button type="submit" class="code-go" id="loginBtn" ' +
+        'title="Đăng nhập" aria-label="Đăng nhập">#</button>');
 
   return '<div class="code-login">' +
-    '<div class="code-fill above">' + above + '</div>' +
+    '<div class="code-block">' + above + '</div>' +
     '<form class="code-repl" id="loginForm" autocomplete="on">' + repl + '</form>' +
-    '<div class="code-fill below">' + LOGIN_CODE_BELOW.map(code).join('') + '</div>' +
+    '<div class="code-block">' + LOGIN_CODE_BELOW.map(code).join('') + '</div>' +
   '</div>';
 }
 function wireLogin(){
@@ -4375,15 +4539,50 @@ function wireLogin(){
   const pass = document.getElementById('login_pass');
   const go = ()=>{
     if(attemptLogin(user.value, pass.value)){ loginError=""; renderApp(); toast('Xin chào, '+currentUser().name); }
-    else { loginError = "Sai tên đăng nhập hoặc mật khẩu"; renderApp(); document.getElementById('login_user').value = user.value; }
+    else {
+      loginError = "Sai tên đăng nhập hoặc mật khẩu"; renderApp();
+      // renderApp() has rebuilt the screen and re-run wireLogin, which sized
+      // the fresh field against its empty value. Putting the username back
+      // afterwards therefore leaves it in a field zero characters wide — the
+      // text is there and invisible. The input event is what the new field's
+      // own listener is waiting for, so it measures itself.
+      const back = document.getElementById('login_user');
+      back.value = user.value;
+      back.dispatchEvent(new Event('input'));
+    }
   };
-  // The fields live in a real <form> now, which is what lets Enter in either
-  // one submit, gives the phone keyboard its Go key, and lets a password
-  // manager see a pair it can fill and offer to save. One listener, on the
-  // form: hanging a second one on the inputs would run go() twice per Enter.
+  // The fields live in a real <form>, which is what lets Enter in either one
+  // submit, gives the phone keyboard its Go key, and lets a password manager
+  // see a pair it can fill and offer to save. One listener, on the form:
+  // hanging a second one on the inputs would run go() twice per Enter. The #
+  // is this form's submit button, so clicking it comes through here too.
   const form = document.getElementById('loginForm');
   form.onsubmit = (e)=>{ e.preventDefault(); go(); };
-  user.focus();
+
+  // Each field sits between the two quote marks of a string literal, so it has
+  // to be exactly as wide as what is in it, or the closing quote drifts off
+  // into the whitespace and the line stops reading as an assignment. Empty and
+  // untouched it is zero characters wide, so the line reads "" and not " ";
+  // once it has the caret it opens up by one, which is where the caret goes.
+  // Width follows the value only. The empty-but-focused case is a min-width in
+  // CSS, so there is no focus state to mirror here and nothing to fall out of
+  // step with the browser.
+  const fit = (el)=>{ el.style.width = el.value.length + 'ch'; };
+  [user, pass].forEach(el=>{
+    fit(el);
+    el.addEventListener('input', ()=> fit(el));
+    // A zero-width target cannot be clicked, so the whole line is the target.
+    el.closest('.cl').addEventListener('mousedown', (e)=>{
+      if(e.target !== el){ e.preventDefault(); el.focus(); }
+    });
+  });
+  // Autofill does not fire `input` in every browser, and a filled field left at
+  // zero width is the one way these lines can look broken on arrival.
+  setTimeout(()=>{ fit(user); fit(pass); }, 400);
+
+  // Deliberately no focus() here: the page opens as a file being read, and
+  // stealing the caret into a field is the one thing that would give away that
+  // it is a form.
 }
 
 /* --- idle auto-lock --- */
