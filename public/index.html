@@ -2926,6 +2926,25 @@ body{
   border-radius:8px; padding:5px 10px; font-size:11px; font-weight:650; cursor:pointer;
 }
 .tb-answer-acts button:hover{background:var(--brand); color:var(--on-brand,#fff); border-color:transparent;}
+/* A proposal from the model. Deliberately set apart from the answer above it:
+   reading a reply and approving a change to your data are different acts, and
+   the second one should never be reachable by accident. */
+.tb-propose{
+  margin-top:10px; padding:10px 12px; border-radius:11px;
+  border:1px solid var(--brand); background:var(--brand-soft);
+  font-size:12.5px; line-height:1.5; color:var(--text);
+}
+.tb-propose b{font-weight:700;}
+.tb-propose .tb-answer-acts{margin-top:9px;}
+.tb-propose button[data-ai-apply]{
+  background:var(--brand); color:var(--on-brand,#fff); border-color:transparent; font-weight:700;
+}
+/* Armed: the first press on a destructive action only gets this far. */
+.tb-propose button[data-ai-apply].danger{
+  background:var(--danger); border-color:transparent; color:#fff;
+}
+.tb-propose.is-danger{border-color:var(--danger); background:var(--danger-soft);}
+.tb-thinking{color:var(--text-2); font-style:italic;}
 /* One row that reads as a door rather than a button: it leads somewhere. */
 .tb-care{
   display:flex; align-items:center; gap:11px; width:100%; text-align:left;
@@ -11537,7 +11556,9 @@ const AI_CONFIG = {
 };
 function aiSettings(){
   const s = STATE.settings;
-  if(!s.ai) s.ai = { enabled:false, apiKey:'', model:AI_CONFIG.model, personality:'friendly' };
+  // Enabled on first run. Anyone who has already been to Settings and turned
+  // it off keeps that choice — this is only the value it starts at.
+  if(!s.ai) s.ai = { enabled:true, apiKey:'', model:AI_CONFIG.model, personality:'friendly' };
   return s.ai;
 }
 /** Never true just because a key was typed — the whole feature has to be on. */
@@ -11773,6 +11794,185 @@ function executeAIAction(a){
   return { ok:false, message:'unhandled' };
 }
 
+
+/* =========================================================
+   TOBBY'S BRAIN — the prompt, the budget, and the one call
+   ---------------------------------------------------------
+   Everything below sits on top of the existing plumbing and changes none of
+   it: geminiService does the talking, AI_ACTIONS is the vocabulary,
+   validateAIAction is the gate, executeAIAction is the only writer. This file
+   adds the three things that were missing — something to say to the model,
+   somewhere to say it from, and a confirm step before anything happens.
+
+   What is sent: task and note TITLES and ids, deadlines, statuses. What is
+   never sent: note CONTENT, credentials, settings, or the state blob. The
+   model is being asked to point at a record, not to read the diary.
+   ========================================================= */
+
+/** The vocabulary, generated from AI_ACTIONS itself so a change there cannot
+ *  leave a hand-written copy behind saying something different. */
+function tbActionVocabulary(){
+  return Object.keys(AI_ACTIONS).map(k=>{
+    const d = AI_ACTIONS[k];
+    const needs = d.needs.length ? d.needs.join(', ') : '—';
+    return '- ' + k + ' (payload bắt buộc: ' + needs + ')'
+      + (d.destructive ? '  [PHÁ HUỶ — chỉ đề xuất khi người dùng nói rõ muốn xoá]' : '');
+  }).join('\n');
+}
+
+/** A compact, ID-carrying picture of the board.
+ *
+ *  Short on purpose. It is the difference between a model that can say
+ *  "hoàn thành Báo cáo Q4" and mean a real row, and one that invents a
+ *  plausible id — which validateAIAction would refuse anyway, leaving the
+ *  user with an answer that quietly does nothing. */
+function tbBoardContext(){
+  const open = activeTasks()
+    .filter(t=> !t.archived && t.status !== 'Hoàn thành' && !isFrozen(t));
+  const overdue = open.filter(isOverdue).length;
+  const today = open.filter(t=> isSameDay(t.deadline) && !isOverdue(t)).length;
+  const fmt = (t)=> '  • id=' + t.id + ' | ' + String(t.title||'').slice(0,90)
+    + ' | hạn: ' + (t.deadline ? fmtDate(t.deadline) : 'không')
+    + ' | ' + (t.status||'') + ' | ưu tiên: ' + (t.priority||'');
+  const tasks = open.slice(0, 15).map(fmt).join('\n') || '  (không có việc nào đang mở)';
+  const projects = (STATE.projects||[]).slice(0, 10)
+    .map(p=> '  • id=' + p.id + ' | ' + String(p.name||p.title||'').slice(0,80)).join('\n')
+    || '  (chưa có dự án)';
+  // Titles only. A note's body is the user's own writing and has no business
+  // leaving the browser to answer "which note did you mean".
+  const notes = (STATE.notes||[]).filter(n=> !n.deletedAt && !n.archived)
+    .slice(0, 10).map(n=> '  • id=' + n.id + ' | ' + String(n.title||'(không tên)').slice(0,80)).join('\n')
+    || '  (chưa có ghi chú)';
+  return [
+    'BẢNG CÔNG VIỆC HIỆN TẠI (dữ liệu thật, dùng đúng id này):',
+    'Hôm nay là ' + fmtDate(nowISO()) + '. Đang mở ' + open.length + ' việc, '
+      + overdue + ' quá hạn, ' + today + ' đến hạn hôm nay.',
+    'NHIỆM VỤ ĐANG MỞ:', tasks,
+    'DỰ ÁN:', projects,
+    'GHI CHÚ (chỉ tiêu đề):', notes,
+  ].join('\n');
+}
+
+function tobbyAiSystemPrompt(){
+  return [
+    'Bạn là Tobby — chú chó đồng hành trong app quản lý công việc Bach Office.',
+    '',
+    'GIỌNG VĂN:',
+    '- Xưng “mình”, gọi người dùng là “bạn”. Thân mật, câu ngắn, tiếng Việt.',
+    '- Là bạn đồng hành, không phải trợ lý doanh nghiệp. Không bao giờ trách móc',
+    '  người dùng vì việc trễ hạn — nói cho họ biết, rồi giúp họ làm.',
+    '- Trả lời gọn: một đến ba câu là đủ. Không gạch đầu dòng dài dòng.',
+    '',
+    'BẠN CÓ THỂ ĐỀ XUẤT MỘT HÀNH ĐỘNG, không bao giờ tự làm.',
+    'Chỉ được dùng đúng các type sau, payload chỉ chứa đúng các field được liệt kê:',
+    tbActionVocabulary(),
+    '',
+    'LUẬT VỀ ID — quan trọng nhất:',
+    '- Chỉ dùng id có thật trong danh sách bên dưới. TUYỆT ĐỐI không bịa id.',
+    '- Nếu không chắc chắn người dùng đang nói đến bản ghi nào, đặt action = null',
+    '  và hỏi lại bằng chữ trong reply.',
+    '- Không bịa số liệu. Chỉ nói những gì có trong bảng dưới đây.',
+    '',
+    tbBoardContext(),
+    '',
+    'ĐỊNH DẠNG TRẢ LỜI — bắt buộc:',
+    'Chỉ trả về JSON, không thêm chữ nào ngoài JSON:',
+    '{"reply": "câu trả lời tiếng Việt", "action": {"type": "...", "payload": {...}} }',
+    'hoặc {"reply": "...", "action": null} khi không cần làm gì.',
+  ].join('\n');
+}
+
+/* ---------- a soft daily budget ----------
+   The free tier is generous but finite, and a companion that burns it on
+   nothing is a companion that stops working by lunchtime. Fifty a day per
+   browser is roomy for real use. It only ever gates the MODEL call — every
+   pattern-matched question keeps answering for free. */
+const TB_AI_DAILY_MAX = 50;
+const TB_AI_BUDGET_KEY = 'tobby.aiBudget.v1';
+
+function tbAiBudget(){
+  const today = tbToday();
+  try{
+    const v = JSON.parse(localStorage.getItem(TB_AI_BUDGET_KEY) || 'null');
+    if(v && v.date === today) return v;
+  }catch(e){}
+  return { date: today, used: 0 };
+}
+function tbAiHasBudget(){ return tbAiBudget().used < TB_AI_DAILY_MAX; }
+function tbAiSpend(){
+  const b = tbAiBudget();
+  b.used += 1;
+  try{ localStorage.setItem(TB_AI_BUDGET_KEY, JSON.stringify(b)); }catch(e){}
+}
+
+/* ---------- the conversation ----------
+   In memory, for this panel session only. Closing the panel forgets it: a
+   companion who remembers yesterday's half-question is worse than one who
+   starts fresh, and nothing here is worth persisting. */
+let tbAiHistory = [];
+function tobbyAiReset(){ tbAiHistory = []; }
+
+/**
+ * Ask the model. Returns the same `{text, ...}` shape tobbyAsk() returns, so
+ * the panel renders it with no special case, plus `proposal` when the model
+ * has suggested something the allowlist accepts.
+ */
+async function tobbyAskAI(text){
+  const fallback = { text: TB_L(
+    'Mình trả lời được về: việc nên làm, việc gấp, việc quá hạn, việc đã xong, tuần này, việc nặng nhất.',
+    'I can answer: what to do next, what is urgent, what is overdue, what is done, this week, the heaviest task.') };
+  if(!aiEnabled()) return fallback;
+  if(!tbAiHasBudget()) return { text: TB_L(
+    'Hôm nay hỏi nhiều rồi, mai hỏi tiếp Tobby nhé 😅',
+    'That is a lot of questions for one day — ask me again tomorrow 😅') };
+  try{
+    tbAiSpend();
+    const out = await geminiService.sendMessage(tobbyAiSystemPrompt(), tbAiHistory, text);
+    if(!out) return fallback;
+    const reply = String(out.reply || '').trim();
+    if(!reply) return fallback;
+    // Keep the thread short. historyMax counts turns, and each turn is a pair.
+    tbAiHistory.push({ role:'user', text }, { role:'model', text: reply });
+    while(tbAiHistory.length > AI_CONFIG.historyMax) tbAiHistory.shift();
+    const res = { text: reply, ai:true };
+    // A proposal only survives if the allowlist accepts it. A refused one is
+    // simply not shown: the reply still stands, and the user is not shown a
+    // validation error they did not cause and cannot act on.
+    const a = out.action;
+    if(a && typeof a === 'object'){
+      const v = validateAIAction(a);
+      if(v.ok) res.proposal = { action:a, destructive: !!v.destructive };
+    }
+    return res;
+  }catch(e){
+    return { text: geminiService.handleError(e) };
+  }
+}
+
+/** The proposal, in words rather than JSON. Nobody should be asked to approve
+ *  a payload they have to parse. */
+function tobbyActionSummary(a){
+  const p = a.payload || {};
+  const taskName = ()=>{ const t = STATE.tasks.find(x=>x.id===p.id); return t ? t.title : ''; };
+  const noteName = ()=>{ const n = (STATE.notes||[]).find(x=>x.id===p.id); return n ? (n.title||'ghi chú') : ''; };
+  const projName = ()=>{ const x = (STATE.projects||[]).find(y=>y.id===p.id); return x ? (x.name||x.title||'dự án') : ''; };
+  const q = (s)=> '“' + s + '”';
+  switch(a.type){
+    case 'CREATE_TASK':       return TB_L('tạo nhiệm vụ ' + q(p.title), 'create task ' + q(p.title));
+    case 'UPDATE_TASK':       return TB_L('sửa nhiệm vụ ' + q(taskName()), 'update ' + q(taskName()));
+    case 'COMPLETE_TASK':     return TB_L('hoàn thành ' + q(taskName()), 'complete ' + q(taskName()));
+    case 'DELETE_TASK':       return TB_L('xoá nhiệm vụ ' + q(taskName()), 'delete ' + q(taskName()));
+    case 'CREATE_NOTE':       return TB_L('tạo ghi chú ' + q(p.title), 'create note ' + q(p.title));
+    case 'UPDATE_NOTE':       return TB_L('sửa ghi chú ' + q(noteName()), 'update note ' + q(noteName()));
+    case 'OPEN_TASK':         return TB_L('mở ' + q(taskName()), 'open ' + q(taskName()));
+    case 'OPEN_PROJECT':      return TB_L('mở dự án ' + q(projName()), 'open project ' + q(projName()));
+    case 'OPEN_NOTE':         return TB_L('mở ghi chú ' + q(noteName()), 'open note ' + q(noteName()));
+    case 'OPEN_CALENDAR':     return TB_L('mở lịch', 'open the calendar');
+    case 'START_FOCUS':       return TB_L('bắt đầu một phiên Focus', 'start a focus session');
+    case 'SHOW_NOTIFICATIONS':return TB_L('mở thông báo', 'open notifications');
+  }
+  return TB_L('làm việc này', 'do this');
+}
 /* =========================================================
    TOBBY — the rig, and the three layers that drive it
    ---------------------------------------------------------
@@ -13982,7 +14182,10 @@ function tobbyAsk(text){
     /nặng|lâu|heavy|big/.test(q)                    ? 'heavy'   :
     /tobby|lớn|tuổi|age|grow/.test(q)               ? 'tobby'   :
     /làm gì|next|bắt đầu|start/.test(q)            ? 'next'    : null;
-  if(!hit) return { text: TB_L(
+  // Nothing matched. `fallback` marks it so the caller knows this is the point
+  // where a real model is worth asking — the static line stays as the answer
+  // if there is no model, no budget, or no network.
+  if(!hit) return { fallback:true, text: TB_L(
     'Mình trả lời được về: việc nên làm, việc gấp, việc quá hạn, việc đã xong, tuần này, việc nặng nhất.',
     'I can answer: what to do next, what is urgent, what is overdue, what is done, this week, the heaviest task.') };
   return tobbyAnswer(hit);
@@ -14000,6 +14203,12 @@ function tobbyPanel(){
   const pop = tobbyPopup('\ud83d\udc36 Tobby');
   const overlay = pop.el;
   const close = pop.close;
+  // A fresh panel is a fresh conversation. Nothing about a half-finished
+  // question from an hour ago improves the next answer.
+  tobbyAiReset();
+  // Whether a destructive proposal has been pressed once already. Lives here,
+  // not on the proposal, so re-drawing for any other reason disarms it.
+  let aiArmed = false;
 
   function draw(){
     const g = TobbyGrowth.progress();
@@ -14031,6 +14240,19 @@ function tobbyPanel(){
           (answer.notes ? '<div class="tb-answer-acts">' + answer.notes.map(n=>
             '<button data-note="' + esc(n.id) + '" title="' + esc(n.excerpt) + '">' +
             esc(n.title) + '</button>').join('') + '</div>' : '') +
+          // The model may propose; only a press applies. A destructive one
+          // needs two, and says so on the button rather than in a dialog the
+          // eye skips.
+          (answer.proposal ? '<div class="tb-propose' + (answer.proposal.destructive ? ' is-danger' : '') + '">' +
+            L2('Tobby đề xuất: ','Tobby suggests: ') + '<b>' +
+            esc(tobbyActionSummary(answer.proposal.action)) + '</b>.' +
+            '<div class="tb-answer-acts">' +
+              '<button data-ai-apply' + (aiArmed ? ' class="danger"' : '') + '>' +
+              (aiArmed ? L2('Bấm lần nữa để xoá thật','Press again to really delete')
+                       : L2('Áp dụng','Apply')) + '</button>' +
+              '<button data-ai-skip>' + L2('Bỏ qua','Skip') + '</button>' +
+            '</div>' +
+          '</div>' : '') +
           '</div>' : '') +
 
         '<div class="tb-sec">' + L2('H\u1ecfi Tobby','Ask Tobby') + '</div>' +
@@ -14074,7 +14296,13 @@ function tobbyPanel(){
     if(form) form.onsubmit = (e)=>{
       e.preventDefault(); e.stopPropagation();
       const q = overlay.querySelector('[data-q]').value.trim();
-      if(q) show(tobbyAsk(q));
+      if(!q) return;
+      const r = tobbyAsk(q);
+      // Matched a question it already knows: answer instantly and spend
+      // nothing. Only the ones it cannot place are worth a model.
+      if(!r.fallback || !aiEnabled()){ show(r); return; }
+      show({ text: TB_L('Tobby đang nghĩ…','Tobby is thinking…'), thinking:true });
+      tobbyAskAI(q).then(res=> show(res)).catch(()=> show(r));
     };
     const acts = overlay.querySelector('.tb-answer-acts');
     if(acts && answer && answer.task){
@@ -14087,6 +14315,31 @@ function tobbyPanel(){
       VIEW = 'notes'; render();
       if(typeof openNote === 'function') openNote(id);
     });
+    const apply = overlay.querySelector('[data-ai-apply]');
+    if(apply) apply.onclick = (e)=>{
+      e.stopPropagation();
+      const prop = answer && answer.proposal;
+      if(!prop) return;
+      // Two presses for anything destructive. The first only arms it, and the
+      // button says what the second one will do — a dialog at this size is
+      // something people click through without reading.
+      if(prop.destructive && !aiArmed){ aiArmed = true; draw(); return; }
+      // Re-validated at the moment of the press, not at the moment of the
+      // proposal: the board may have moved on in between.
+      const v = validateAIAction(prop.action);
+      if(!v.ok){ aiArmed = false; show({ text: TB_L('Việc đó không còn đúng nữa rồi.','That no longer applies.') }); return; }
+      const out = executeAIAction(prop.action);
+      aiArmed = false;
+      show({ text: (out && out.message) || TB_L('Xong rồi.','Done.') });
+      try{ render(); }catch(err){}
+    };
+    const skip = overlay.querySelector('[data-ai-skip]');
+    if(skip) skip.onclick = (e)=>{
+      e.stopPropagation();
+      aiArmed = false;
+      if(answer) delete answer.proposal;
+      draw();
+    };
     overlay.querySelectorAll('[data-do]').forEach(b=> b.onclick = (e)=>{
       e.stopPropagation();
       const k = b.dataset.do;
