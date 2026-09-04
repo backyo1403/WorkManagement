@@ -2842,41 +2842,61 @@ body{
   min-width:54px; text-align:right; font-size:12.5px; font-weight:700;
   font-variant-numeric:tabular-nums; color:var(--text);
 }
-/* Evolution sparks. Six small squares, in his own pixel idiom, gone in a
-   second — a moment, not a fanfare. */
-.tb-spark{
-  position:fixed; z-index:131; width:5px; height:5px; border-radius:1px;
-  pointer-events:none; background:var(--brand);
-  animation:tbSpark .9s cubic-bezier(.2,.7,.3,1) forwards;
+/* The rig's effect library, drawn as glyphs. Colour and size come from the
+   call — one name can be a small thing at his head or a large one around all
+   of him — so only the movement lives here, one keyframe per kind. */
+.tb-vfx{
+  position:fixed; z-index:131; pointer-events:none;
+  font-family:'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size:12px; font-weight:700; line-height:1;
+  text-shadow:0 1px 2px rgba(10,14,25,.28);
+  opacity:0; will-change:transform, opacity;
 }
-@keyframes tbSpark{
+.tb-vfx.k-rise  {animation:tbVfxOut  1.15s cubic-bezier(.2,.7,.3,1) forwards;}
+.tb-vfx.k-burst {animation:tbVfxOut  .95s  cubic-bezier(.15,.85,.3,1) forwards;}
+.tb-vfx.k-fling {animation:tbVfxOut  1s    cubic-bezier(.25,.6,.4,1) forwards;}
+.tb-vfx.k-fall  {animation:tbVfxFall 1.25s cubic-bezier(.4,0,.7,1) forwards;}
+.tb-vfx.k-settle{animation:tbVfxOut  1.5s  cubic-bezier(.2,.5,.3,1) forwards;}
+/* The charge runs the other way: it starts spread out and is pulled in, which
+   is what makes a LevelUp read as gathering before it releases. */
+.tb-vfx.k-draw  {animation:tbVfxIn   .85s  ease-in forwards;}
+@keyframes tbVfxOut{
+  0%{opacity:0; transform:translate(0,0) scale(.55);}
+  18%{opacity:1; transform:translate(calc(var(--dx) * .22), calc(var(--dy) * .22)) scale(1.05);}
+  100%{opacity:0; transform:translate(var(--dx), var(--dy)) scale(.85);}
+}
+@keyframes tbVfxFall{
   0%{opacity:0; transform:translate(0,0) scale(.6);}
-  20%{opacity:1;}
-  100%{opacity:0; transform:translate(var(--dx), var(--dy)) scale(1.1);}
+  22%{opacity:1; transform:translate(calc(var(--dx) * .2), calc(var(--dy) * .12)) scale(1);}
+  100%{opacity:0; transform:translate(var(--dx), var(--dy)) scale(.9);}
 }
-:root:not([data-motion="full"]) .tb-spark{display:none;}
-/* Effect flavours. The rig's table names nine of them; these are the shapes
-   they take. All are small, all are brief, none of them is a popup. */
-.tb-spark.big{width:7px; height:7px;}
-.tb-spark.warn{background:var(--danger, #C0483A);}
-.tb-spark.calm{background:var(--text-3);}
-.tb-spark.in{animation:tbSparkIn .7s ease-in forwards;}
-@keyframes tbSparkIn{
+@keyframes tbVfxIn{
   0%{opacity:0; transform:translate(var(--dx), var(--dy)) scale(1);}
   25%{opacity:1;}
-  100%{opacity:0; transform:translate(0,0) scale(.4);}
+  100%{opacity:0; transform:translate(0,0) scale(.35);}
 }
-.tb-zzz{
+/* Reduced motion keeps the vocabulary and drops the travel: one glyph, held
+   still, faded out. Hiding it outright would mean a whole channel of feedback
+   existed only for people who can watch it move. */
+.tb-vfx.still{animation:tbVfxHold .9s ease-out forwards; transform:translate(0,-14px);}
+@keyframes tbVfxHold{0%{opacity:0;} 20%{opacity:1;} 70%{opacity:1;} 100%{opacity:0;}}
+
+/* A state rather than a moment: sleeping, thinking, working, typing. Stays up
+   for as long as the clip does and is removed the frame it stops. */
+.tb-vfx-loop{
   position:fixed; z-index:131; pointer-events:none;
-  font-size:13px; font-weight:800; color:var(--text-3);
-  animation:tbZzz 2.4s ease-out forwards;
+  display:flex; gap:3px; align-items:flex-end;
+  font-family:'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size:12px; font-weight:700; line-height:1;
+  text-shadow:0 1px 2px rgba(10,14,25,.28);
 }
-@keyframes tbZzz{
-  0%{opacity:0; transform:translate(0,0) scale(.7);}
-  25%{opacity:.9;}
-  100%{opacity:0; transform:translate(16px,-34px) scale(1.1);}
+.tb-vfx-loop span{animation:tbVfxBob 1.56s ease-in-out infinite; opacity:.25;}
+@keyframes tbVfxBob{
+  0%,100%{opacity:.2;  transform:translateY(2px)  scale(.85);}
+  35%    {opacity:1;   transform:translateY(-5px) scale(1.05);}
+  70%    {opacity:.45; transform:translateY(-9px) scale(.9);}
 }
-:root:not([data-motion="full"]) .tb-zzz{display:none;}
+.tb-vfx-loop.still span{animation:none; opacity:.75;}
 /* The evolution moment. Everything else in the app steps back for four
    seconds: the page is dimmed and softened, he is lifted above it and drawn
    larger, and one card names what he became. No confetti, no modal buttons,
@@ -13268,24 +13288,60 @@ const TobbyAnim = {
     TobbyRig.render();
   },
 
-  /** Fire the rig's own effect table against the clip that is running.
+  /** Fire the rig's effects against the clip that is running.
    *
-   *  Tracked per action so a looping clip fires again each time round, and so
-   *  a clip restarted from the top does not skip its first beat. */
-  _fxSeen:{},
+   *  Three kinds live here, because all three are answers to the same question
+   *  — what is on screen right now — and splitting them would mean three places
+   *  deciding which of a clip's two possible effects wins:
+   *
+   *    · a schedule of beats, fired as the clip's own time passes each mark;
+   *    · four clips whose effect is a STATE, put up when the clip starts and
+   *      taken down the instant it stops;
+   *    · every other clip in the rig's clipMap, fired once when it begins.
+   *
+   *  Deliberately not hung off tobbyEmit(), where the moods are chosen. Half of
+   *  these moods never pass through it — being poked into Tobby_Angry, settling
+   *  into Tobby_Focused for a session — and a hook there would have missed them
+   *  while also needing its own copy of the schedule-wins rule. Watching the
+   *  clip catches every path into a mood, whoever asked for it. */
+  _fxSeen:{}, _fxClip:'',
   fireClipEvents(){
-    const spec = TobbyRig.spec && TobbyRig.spec.events;
-    if(!spec) return;
+    const spec = tbVfxSchedule();
     const a = this.actionAction || this.baseAction;
     const name = this.actionName || this.baseName;
-    if(!a || !name || !spec[name]) return;
+
+    // A state effect belongs to its clip and to nothing else.
+    if(tbVfxLoopName && !(name && TB_VFX_LOOP_CLIPS.has(name))) tobbyVfxLoopOff();
+
+    if(name !== this._fxClip){
+      this._fxClip = name || '';
+      this._fxSeen = {};                       // a new clip starts its beats over
+      if(name && TB_VFX_LOOP_CLIPS.has(name)){
+        const code = (spec[name] && spec[name][0] && spec[name][0].e) || '';
+        const state = TB_VFX_EVENT_MAP[code];
+        if(state) try{ tobbyVfxLoopOn(state); }catch(e){}
+      } else {
+        // The clipMap fallback, for the moods with no schedule of their own.
+        const once = tbVfxForClip(name);
+        if(once) try{ tobbyVfx(once, { anchor:'head', scale:1 }); }catch(e){}
+      }
+    }
+    if(tbVfxLoopEl) try{ tobbyVfxLoopPlace(); }catch(e){}
+
+    if(!a || !name || !spec[name] || TB_VFX_LOOP_CLIPS.has(name)) return;
     const dur = a._clip ? a._clip.duration : 0;
     // Do not wrap a clip that plays once and holds. Tobby_Evolution is exactly
     // 4.0s long and its last beat is AT 4.0 — the modulo turned that into 0 and
     // the settle never fired, so the evolution ended on the transformation with
     // nothing to close it.
-    const loops = dur && !TB_ONCE.has(name);
-    const now = loops ? (a.time % dur) : a.time;
+    const once = TB_ONCE.has(name);
+    const loops = dur && !once;
+    let now = loops ? (a.time % dur) : a.time;
+    // ...and clamping is not quite exact either. An action that has finished
+    // sits a hair under its duration on some frames, which would leave that
+    // same 4.0s beat one float short of firing for ever. Once it has stopped
+    // advancing at the end, treat the clip as complete.
+    if(once && dur && (!a.isRunning() || a.time >= dur - 1e-3)) now = dur;
     const seen = this._fxSeen[name] || (this._fxSeen[name] = { last: -1 });
     if(now < seen.last) seen.last = -1;              // the clip looped round
     for(const ev of spec[name]){
@@ -15899,75 +15955,276 @@ function tobbyTick(){
     tobbyEmit('multiple_urgent', { opener:true });
   }
 }
-/** Six sparks off the top of him. Deliberately small: the brief asks for a
- *  moment, not a mobile-game popup. */
-function tobbySparks(n, opt){
-  if(tbReduceMotion()) return;
+/* =========================================================
+   THE VFX LIBRARY, AS THE RIG DEFINES IT
+   ---------------------------------------------------------
+   The model carries two dictionaries and a schedule, and this reads all three
+   rather than inventing effects to go with the clips.
+
+     extras.bachOffice.vfxLibrary.eventMap  → TB_VFX_EVENT_MAP
+     extras.bachOffice.vfxLibrary.clipMap   → TB_VFX_CLIP_MAP
+     extras.bachOffice.events               → TB_VFX_EVENTS
+
+   The first two are copied here verbatim so the names survive a model that
+   fails to load; the schedule is read from the live rig when it is there and
+   falls back to this copy when it is not.
+
+   What the rig does NOT carry is any picture. Its own note says so —
+   "Not part of the GLB — read events[] and play the matching id in your own
+   runtime" — so the glyphs below are this app's answer to the nineteen names,
+   and the only table here that is not the rig's own words.
+   ========================================================= */
+
+/** Rig event code → effect name. Verbatim from vfxLibrary.eventMap. */
+const TB_VFX_EVENT_MAP = {
+  SMALL_PIXEL_SPARKS:  'happy_sparkles',
+  PIXEL_BURST:         'star_burst',
+  PIXEL_DUST:          'steam_puff',
+  PIXEL_CHARGE:        'sparkle_trail',
+  PIXEL_EXPLOSION:     'confetti_burst',
+  PIXEL_TRANSFORMATION:'golden_aura',
+  PIXEL_SETTLE:        'golden_stars',
+  PIXEL_ALERT:         'warning_triangle',
+  PIXEL_PING:          'exclamation_pop',
+  PIXEL_ZZZ:           'zzz',
+  PIXEL_ZZZ_LOOP:      'zzz',
+  PIXEL_THOUGHT_LOOP:  'thought_bubbles',
+  PIXEL_SCREEN_LOOP:   'floating_dots',
+};
+
+/** Clip → effect name, for clips with no schedule of their own. Verbatim from
+ *  vfxLibrary.clipMap. Seven of these fourteen also appear in TB_VFX_EVENTS;
+ *  for those the schedule wins and this is never consulted — see tbVfxForClip. */
+const TB_VFX_CLIP_MAP = {
+  Tobby_Happy:'pink_hearts',      Tobby_Excited:'confetti_burst',
+  Tobby_Curious:'question_marks', Tobby_Thinking:'thought_bubbles',
+  Tobby_Worried:'sweat_drops',    Tobby_Sad:'blue_tears',
+  Tobby_Sleepy:'zzz',             Tobby_Surprised:'exclamation_pop',
+  Tobby_Angry:'angry_marks',      Tobby_Proud:'golden_stars',
+  Tobby_Sleep:'sleep_bubbles',    Tobby_Working:'floating_dots',
+  Tobby_Typing:'floating_dots',   Tobby_Focused:'thinking_dots',
+};
+
+/** The schedule, in seconds from the start of each clip. Verbatim from
+ *  extras.bachOffice.events — kept as a fallback for a rig that loaded without
+ *  its extras; tbVfxSchedule() prefers the live copy. */
+const TB_VFX_EVENTS = {
+  Tobby_Happy:            [{t:0.18, e:'SMALL_PIXEL_SPARKS'}, {t:0.54, e:'SMALL_PIXEL_SPARKS'}],
+  Tobby_EatFromBowl:      [{t:0.3,  e:'SMALL_PIXEL_SPARKS'}, {t:1.5,  e:'SMALL_PIXEL_SPARKS'}, {t:3.3, e:'SMALL_PIXEL_SPARKS'}],
+  Tobby_Excited:          [{t:0.12, e:'PIXEL_BURST'},        {t:0.4,  e:'SMALL_PIXEL_SPARKS'}],
+  Tobby_Jump:             [{t:0.38, e:'SMALL_PIXEL_SPARKS'}, {t:0.8,  e:'PIXEL_DUST'}],
+  Tobby_Celebrate:        [{t:0.2,  e:'PIXEL_BURST'},        {t:0.68, e:'PIXEL_BURST'}],
+  Tobby_LevelUp:          [{t:0.3,  e:'PIXEL_CHARGE'},       {t:0.6,  e:'PIXEL_EXPLOSION'}],
+  Tobby_Evolution:        [{t:0.7,  e:'PIXEL_CHARGE'},       {t:1.5,  e:'PIXEL_TRANSFORMATION'}, {t:4, e:'PIXEL_SETTLE'}],
+  Tobby_TaskCompleted:    [{t:0.2,  e:'SMALL_PIXEL_SPARKS'}],
+  Tobby_UrgentNotification:[{t:0.12,e:'PIXEL_ALERT'}],
+  Tobby_LookAtNotification:[{t:0.25,e:'PIXEL_PING'}],
+  Tobby_Sleepy:           [{t:1.6,  e:'PIXEL_ZZZ'}],
+  Tobby_Sleep:            [{t:0,    e:'PIXEL_ZZZ_LOOP'}],
+  Tobby_Thinking:         [{t:0,    e:'PIXEL_THOUGHT_LOOP'}],
+  Tobby_Working:          [{t:0,    e:'PIXEL_SCREEN_LOOP'}],
+  Tobby_Typing:           [{t:0,    e:'PIXEL_SCREEN_LOOP'}],
+};
+
+/** Four glyphs and a colour for each of the nineteen names, plus how the thing
+ *  moves. Text characters only, no emoji: an emoji-presentation glyph ignores
+ *  CSS colour, and half of these names differ from another only by their
+ *  colour — a tear and a bead of sweat are the same drop.
+ *
+ *  k: rise · drifts upward        burst · flies outward
+ *     fall · drops straight down  fling · thrown out and down
+ *     draw · pulled inward        settle· sinks and fades */
+const TB_VFX_GLYPHS = {
+  happy_sparkles:   { g:['✦','✧','⋆','✩'],  c:'#F5B841', k:'rise'   },
+  star_burst:       { g:['★','✷','✸','✹'],  c:'#FFC94A', k:'burst'  },
+  steam_puff:       { g:['◦','○','◌','°'],  c:'#B9C2CE', k:'fling'  },
+  sparkle_trail:    { g:['✧','⋆','✦','✩'],  c:'#7FD1E8', k:'draw'   },
+  confetti_burst:   { g:['▰','▱','◆','◇'],  c:'#FF6AC1', k:'burst'  },
+  golden_aura:      { g:['✺','❂','✹','◉'],  c:'#FFD34E', k:'burst'  },
+  golden_stars:     { g:['★','✯','✰','✦'],  c:'#FFD34E', k:'settle' },
+  warning_triangle: { g:['▲','△','▴','!'],  c:'#E0574A', k:'rise'   },
+  exclamation_pop:  { g:['!','!!','!?','¡'],c:'#F2994A', k:'rise'   },
+  zzz:              { g:['z','Z','zz','ᶻ'], c:'#9AA6B5', k:'rise'   },
+  thought_bubbles:  { g:['◦','○','◌','·'],  c:'#9AA6B5', k:'rise'   },
+  floating_dots:    { g:['·','∙','•','◦'],  c:'#7FD1E8', k:'rise'   },
+  pink_hearts:      { g:['♥','♡','❥','❦'],  c:'#FF6AC1', k:'rise'   },
+  question_marks:   { g:['?','??','¿','?!'],c:'#7FD1E8', k:'rise'   },
+  sweat_drops:      { g:['•','◦','∙','·'],  c:'#8FD4FF', k:'fling'  },
+  blue_tears:       { g:['•','◦','∙','·'],  c:'#5B9BD5', k:'fall'   },
+  angry_marks:      { g:['#','✖','✗','＃'], c:'#E0574A', k:'burst'  },
+  sleep_bubbles:    { g:['○','◦','∘','°'],  c:'#9AA6B5', k:'rise'   },
+  thinking_dots:    { g:['·','∙','⋯','•'],  c:'#8A94A6', k:'rise'   },
+};
+
+/** Which event codes are whole-body moments rather than something happening at
+ *  his head. Read off the "neo" column of the spec: everything in the big
+ *  celebration group anchors at ROOT, everything else at the head.
+ *
+ *  This is why golden_stars needs no second name. PIXEL_SETTLE — the last beat
+ *  of an evolution — arrives through here and is drawn large around all of him;
+ *  the same golden_stars reached through TB_VFX_CLIP_MAP for a proud mood is
+ *  drawn small at his head. One name, two presentations, decided by the caller. */
+const TB_VFX_ROOT_EVENTS = new Set([
+  'PIXEL_BURST','PIXEL_DUST','PIXEL_CHARGE',
+  'PIXEL_EXPLOSION','PIXEL_TRANSFORMATION','PIXEL_SETTLE',
+]);
+/** The four clips whose effect is a state, not a moment: it appears when the
+ *  clip starts and is taken off the screen the instant the clip stops. */
+const TB_VFX_LOOP_CLIPS = new Set(['Tobby_Sleep','Tobby_Thinking','Tobby_Working','Tobby_Typing']);
+
+/** The schedule the rig itself is carrying, or our copy of it. */
+function tbVfxSchedule(){
+  const live = TobbyRig.spec && TobbyRig.spec.events;
+  return (live && Object.keys(live).length) ? live : TB_VFX_EVENTS;
+}
+/** The effect a clip should show when it has no schedule of its own.
+ *  Returns null for the seven clips that do — their beats are timed, and
+ *  firing this as well would double every one of them. */
+function tbVfxForClip(name){
+  if(!name || tbVfxSchedule()[name]) return null;
+  return TB_VFX_CLIP_MAP[name] || null;
+}
+
+/* ---------- drawing them ---------- */
+
+/** Where the effect hangs, and how far it may travel.
+ *
+ *  Both anchors are measured off the drawn silhouette — the same pixel readback
+ *  the speech bubble is placed against — rather than off the dock. The dock is
+ *  190x220 and he fills the bottom quarter of it: at Young stage the drawing is
+ *  60px tall starting 69% of the way down. Anchoring the whole-body effects at
+ *  a fraction of the DOCK put them 24px above his head, bursting in empty air,
+ *  and would have drifted further wrong at every growth stage. Reading the
+ *  silhouette is also what makes the rig's own promise true — that effects
+ *  "follow every clip and growth stage".
+ *
+ *  Returns a radius as well as a point, because a spread in pixels means
+ *  nothing until you know how big he is being drawn. */
+function tbVfxOrigin(anchor){
   const dock = document.getElementById('tobbyDock');
-  if(!dock) return;
-  const o = opt || {};
+  if(!dock) return null;
   const d = dock.getBoundingClientRect();
-  const cx = d.left + d.width/2;
-  const cy = d.top + d.height * (o.low ? 0.86 : 0.35);
-  const spread = o.spread || 40;
-  for(let i = 0; i < (n||6); i++){
-    const s = document.createElement('div');
-    s.className = 'tb-spark' + (o.cls ? ' ' + o.cls : '') + (o.inward ? ' in' : '');
-    // Dust settles sideways along the floor; everything else lifts.
-    const a = o.low ? (Math.random() - 0.5) * Math.PI * 0.7
-                    : (-0.5 - Math.random()) * Math.PI;
-    const r = spread * (0.6 + Math.random()*0.6);
-    s.style.setProperty('--dx', Math.cos(a)*r + 'px');
-    s.style.setProperty('--dy', (o.low ? Math.abs(Math.sin(a))*r*0.3 : Math.sin(a)*r) + 'px');
-    s.style.left = (cx - 2 + (Math.random()-0.5)*18) + 'px';
-    s.style.top  = (cy - 2) + 'px';
-    s.style.animationDelay = (i*35) + 'ms';
-    document.body.appendChild(s);
-    setTimeout(()=> s.remove(), 1200 + i*35);
+  const h = tobbyHeadPoint();
+  if(!h) return { x: d.left + d.width/2, y: d.top + d.height*0.75, r: 22 };
+  const bodyH = Math.max(20, h.bottom - h.top);
+  if(anchor === 'root') return { x: h.centreX, y: (h.top + h.bottom)/2, r: Math.max(24, bodyH*0.62) };
+  return { x: h.centreX, y: h.top + 4, r: Math.max(14, bodyH*0.34) };
+}
+
+let tbVfxHeadEls = [];        // the one-shot at his head, so a new one replaces it
+/**
+ * Draw an effect by name.
+ * @param {string} name  one of the nineteen in TB_VFX_GLYPHS
+ * @param {{anchor?:'head'|'root', scale?:number, n?:number}} [opt]
+ */
+function tobbyVfx(name, opt){
+  const def = TB_VFX_GLYPHS[name];
+  if(!def) return;
+  const o = opt || {};
+  const anchor = o.anchor === 'root' ? 'root' : 'head';
+  // The head/root difference is already in the measured radius — root is his
+  // whole body, head is a third of it — so `scale` is not doing that job and
+  // stays at 1 unless a caller genuinely wants something outsized.
+  const scale  = o.scale || 1;
+  const at = tbVfxOrigin(anchor);
+  if(!at) return;
+  // Reduced motion still gets the effect, it just does not travel: one glyph,
+  // held briefly and taken away. Suppressing it entirely would mean a whole
+  // vocabulary of feedback existed only for people who can watch it move.
+  const still = tbReduceMotion();
+  const n = still ? 1 : (o.n || (anchor === 'root' ? 9 : 4));
+
+  if(anchor === 'head') tbVfxClearHead();
+  const made = [];
+  const spread = at.r * scale;
+  for(let i = 0; i < n; i++){
+    const el = document.createElement('span');
+    el.className = 'tb-vfx' + (still ? ' still' : ' k-' + def.k);
+    el.textContent = def.g[Math.floor(Math.random() * def.g.length)];
+    el.style.color = def.c;
+    // Sized off him too, not off a constant: at Tiny Puppy he is drawn at half
+    // the height, and a 12px star beside a 30px dog is a sticker on a photo.
+    el.style.fontSize = Math.max(9, at.r * 0.55 * scale).toFixed(1) + 'px';
+    const a = tbVfxAngle(def.k);
+    const r = spread * (0.55 + Math.random() * 0.7);
+    el.style.setProperty('--dx', (Math.cos(a) * r).toFixed(1) + 'px');
+    el.style.setProperty('--dy', (Math.sin(a) * r).toFixed(1) + 'px');
+    el.style.left = (at.x + (Math.random() - 0.5) * spread * 0.7) + 'px';
+    el.style.top  = at.y + 'px';
+    if(!still) el.style.animationDelay = (i * 40) + 'ms';
+    document.body.appendChild(el);
+    made.push(el);
+    setTimeout(()=> el.remove(), (still ? 900 : 1300) + i * 40);
+  }
+  if(anchor === 'head') tbVfxHeadEls = made;
+}
+/** The direction of travel for each kind. Screen coordinates, so negative y
+ *  is upward. */
+function tbVfxAngle(kind){
+  const R = Math.random();
+  switch(kind){
+    case 'burst':  return R * Math.PI * 2;
+    case 'fall':   return (0.30 + R * 0.40) * Math.PI;          // straight down-ish
+    case 'fling':  return (0.08 + R * 0.34) * Math.PI * (Math.random() < .5 ? 1 : -1) + (R < .5 ? 0 : Math.PI);
+    case 'draw':   return R * Math.PI * 2;                       // inward: the CSS reverses it
+    case 'settle': return (0.20 + R * 0.60) * Math.PI;
+    default:       return (-0.25 - R * 0.5) * Math.PI;           // rise
   }
 }
-/* =========================================================
-   Effects, as the rig specifies them
-   ---------------------------------------------------------
-   The model ships a table of events keyed by clip — which effect, and at
-   what time within the clip. Reading it means the sparks land on the beat the
-   animator intended (the charge at 0.7s of an evolution, the transformation at
-   1.5, the settle at 4.0) instead of all at once when the clip is triggered.
-   ========================================================= */
-const TB_FX = {
-  SMALL_PIXEL_SPARKS:   { n:4,  spread:26, cls:'' },
-  PIXEL_BURST:          { n:10, spread:44, cls:'big' },
-  PIXEL_DUST:           { n:6,  spread:22, cls:'calm', low:true },
-  PIXEL_CHARGE:         { n:9,  spread:40, cls:'', inward:true },
-  PIXEL_EXPLOSION:      { n:14, spread:60, cls:'big' },
-  PIXEL_TRANSFORMATION: { n:16, spread:58, cls:'big' },
-  PIXEL_SETTLE:         { n:5,  spread:20, cls:'calm' },
-  PIXEL_ALERT:          { n:6,  spread:30, cls:'warn' },
-  PIXEL_PING:           { n:2,  spread:18, cls:'' },
-  PIXEL_ZZZ:            { zzz:true },
-  PIXEL_ZZZ_LOOP:       { zzz:true, every:2600 },
-  // The three screen/thought loops are ambient states rather than moments;
-  // they belong to the clip itself and need nothing drawn over the top.
-  PIXEL_THOUGHT_LOOP:   null,
-  PIXEL_SCREEN_LOOP:    null,
-};
-function tobbyFx(kind){
-  const f = TB_FX[kind];
-  if(!f || tbReduceMotion()) return;
-  if(f.zzz) return tobbyZzz();
-  tobbySparks(f.n, f);
+function tbVfxClearHead(){
+  tbVfxHeadEls.forEach(el=> el.remove());
+  tbVfxHeadEls = [];
 }
-function tobbyZzz(){
-  const dock = document.getElementById('tobbyDock');
-  if(!dock) return;
-  const d = dock.getBoundingClientRect();
-  const el = document.createElement('div');
-  el.className = 'tb-zzz';
-  el.textContent = 'z';
-  el.style.left = (d.left + d.width*0.62) + 'px';
-  el.style.top  = (d.top + d.height*0.28) + 'px';
-  document.body.appendChild(el);
-  setTimeout(()=> el.remove(), 2500);
+
+/* ---------- the looping states ---------- */
+let tbVfxLoopEl = null, tbVfxLoopName = '';
+/** Show a state effect and keep it there. Idempotent: asking for the one
+ *  already running does nothing, so this is safe to call every frame. */
+function tobbyVfxLoopOn(name){
+  if(tbVfxLoopName === name && tbVfxLoopEl) return;
+  tobbyVfxLoopOff();
+  const def = TB_VFX_GLYPHS[name];
+  if(!def) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'tb-vfx-loop' + (tbReduceMotion() ? ' still' : '');
+  wrap.style.color = def.c;
+  for(let i = 0; i < 3; i++){
+    const s = document.createElement('span');
+    s.textContent = def.g[Math.floor(Math.random() * def.g.length)];
+    s.style.animationDelay = (i * 520) + 'ms';
+    wrap.appendChild(s);
+  }
+  document.body.appendChild(wrap);
+  tbVfxLoopEl = wrap; tbVfxLoopName = name;
+  tobbyVfxLoopPlace();
+}
+/** Follows him. He can be dragged, the dock moves on every navigation, and he
+ *  changes size when he evolves — so the offset is a fraction of his measured
+ *  head rather than a fixed number of pixels. */
+function tobbyVfxLoopPlace(){
+  if(!tbVfxLoopEl) return;
+  const at = tbVfxOrigin('head');
+  if(!at){ tobbyVfxLoopOff(); return; }
+  tbVfxLoopEl.style.left = (at.x + at.r * 0.75) + 'px';
+  tbVfxLoopEl.style.top  = (at.y - at.r * 0.35) + 'px';
+  tbVfxLoopEl.style.fontSize = Math.max(10, at.r * 0.62).toFixed(1) + 'px';
+}
+/** Off the screen now, not when an animation feels like ending. */
+function tobbyVfxLoopOff(){
+  if(tbVfxLoopEl) tbVfxLoopEl.remove();
+  tbVfxLoopEl = null; tbVfxLoopName = '';
+}
+
+/** One beat of the rig's schedule. Everything reaching here is an event code
+ *  from the model, so the anchor and size are decided from the code. */
+function tobbyFx(code){
+  const name = TB_VFX_EVENT_MAP[code];
+  if(!name) return;
+  const root = TB_VFX_ROOT_EVENTS.has(code);
+  // The settle is the last beat of an evolution and the longest sequence the
+  // rig defines; it is the one moment given more than its anchor's own size.
+  const scale = code === 'PIXEL_SETTLE' ? 1.25 : 1;
+  tobbyVfx(name, { anchor: root ? 'root' : 'head', scale });
 }
 /** Put him in the DOM and keep him there.
  *
