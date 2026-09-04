@@ -10983,7 +10983,10 @@ function settingsAIPanel(){
 
     <div class="field" style="margin-top:12px;">
       <label>Mô hình</label>
-      <select id="ai_model">${AI_CONFIG.models.map(([v,l])=>`<option value="${v}" ${a.model===v?'selected':''}>${l}</option>`).join('')}</select>
+      <!-- aiActiveModel(), not a.model: a saved-but-retired name matches no
+           option, so the box would show the first entry while the app went on
+           using the dead one — the dropdown lying about what is in use. -->
+      <select id="ai_model">${AI_CONFIG.models.map(([v,l])=>`<option value="${v}" ${aiActiveModel()===v?'selected':''}>${l}</option>`).join('')}</select>
     </div>
   </div>
   <div class="card" style="max-width:560px;">
@@ -11542,14 +11545,23 @@ function openResetConfirmModal(){
    gone. What survives is the plumbing worth keeping: the transport, the
    settings, and the validation that stands between a model and the store.
    ========================================================= */
+/* The four models this shipped with — gemini-2.0-flash, -2.0-flash-lite,
+   -1.5-flash and -1.5-pro — were all retired by Google. Every request 404'd
+   upstream, which the proxy reported as 502 and Settings showed as "Gemini trả
+   về lỗi": a total outage that looked like a flaky connection.
+
+   Hence the `-latest` aliases as the default and the main choices. Google
+   points them at whatever is current, so this particular failure cannot happen
+   to them again. One pinned version is kept for anyone who needs a fixed
+   target and is willing to watch for its retirement. */
 const AI_CONFIG = {
   provider: 'gemini',
-  model: 'gemini-2.0-flash',
+  model: 'gemini-flash-latest',
   models: [
-    ['gemini-2.0-flash',      'Gemini Flash (nhanh, mặc định)'],
-    ['gemini-2.0-flash-lite', 'Gemini Flash Lite (tiết kiệm)'],
-    ['gemini-1.5-flash',      'Gemini 1.5 Flash'],
-    ['gemini-1.5-pro',        'Gemini 1.5 Pro (sâu hơn, chậm hơn)'],
+    ['gemini-flash-latest',      'Gemini Flash (nhanh, mặc định)'],
+    ['gemini-flash-lite-latest', 'Gemini Flash Lite (tiết kiệm)'],
+    ['gemini-pro-latest',        'Gemini Pro (sâu hơn, chậm hơn)'],
+    ['gemini-2.5-flash',         'Gemini 2.5 Flash (cố định phiên bản)'],
   ],
   proxyUrl: '/api/gemini',
   historyMax: 20,
@@ -11560,6 +11572,20 @@ function aiSettings(){
   // it off keeps that choice — this is only the value it starts at.
   if(!s.ai) s.ai = { enabled:true, apiKey:'', model:AI_CONFIG.model, personality:'friendly' };
   return s.ai;
+}
+/** The saved model, but only while it is still on the list.
+ *
+ *  `saved || AI_CONFIG.model` was not enough: it falls back when the value is
+ *  EMPTY, and a retired model name is not empty. Anyone who had picked one —
+ *  or merely ran the app while it was the default — would have gone on sending
+ *  it for ever, and no amount of fixing the list would have reached them.
+ *
+ *  The stored value is left alone rather than rewritten. Reading around it is
+ *  enough, and if Google ever restores that name it simply starts working
+ *  again with no migration to undo. */
+function aiActiveModel(){
+  const saved = aiSettings().model;
+  return AI_CONFIG.models.some(m => m[0] === saved) ? saved : AI_CONFIG.model;
 }
 /** Never true just because a key was typed — the whole feature has to be on. */
 function aiEnabled(){ return !!aiSettings().enabled; }
@@ -11580,7 +11606,7 @@ const geminiService = {
 
   buildRequest(systemText, history, userText){
     return {
-      model: aiSettings().model || AI_CONFIG.model,
+      model: aiActiveModel(),
       systemInstruction: { parts:[{ text: systemText }] },
       contents: [
         ...history.map(m=>({ role: m.role === 'model' ? 'model' : 'user',

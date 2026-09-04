@@ -16,13 +16,32 @@
  * Environment Variables. Without it this endpoint reports "not configured"
  * and the client quietly falls back.
  */
+/**
+ * The models this endpoint will relay. It is a spend guard, not a feature list:
+ * without it, anyone who can reach this URL could run any model on the
+ * deployment's quota.
+ *
+ * It has to be kept in step with AI_CONFIG.models in public/index.html, and
+ * the cost of forgetting is not obvious — an unlisted name is silently
+ * replaced by DEFAULT_MODEL below rather than refused, so a client updated
+ * alone keeps working while quietly talking to the wrong model. That is
+ * exactly what happened when Google retired the previous four: the list here
+ * still named them, so every request became a 404 upstream no matter what the
+ * client asked for.
+ *
+ * The `-latest` aliases track whatever Google currently serves and cannot be
+ * retired out from under this file. The pinned versions below are the ones
+ * verified live against the API.
+ */
 const ALLOWED_MODELS = new Set([
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-lite',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro',
+  'gemini-flash-latest',
+  'gemini-flash-lite-latest',
+  'gemini-pro-latest',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-pro',
 ]);
-const DEFAULT_MODEL = 'gemini-2.0-flash';
+const DEFAULT_MODEL = 'gemini-flash-latest';
 
 // A ceiling on what we will relay. The client builds a compact context, but
 // the endpoint should not be a way to push megabytes through someone's quota.
