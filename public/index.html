@@ -13299,11 +13299,13 @@ const TobbyAnim = {
    *      taken down the instant it stops;
    *    · every other clip in the rig's clipMap, fired once when it begins.
    *
-   *  Deliberately not hung off tobbyEmit(), where the moods are chosen. Half of
-   *  these moods never pass through it — being poked into Tobby_Angry, settling
-   *  into Tobby_Focused for a session — and a hook there would have missed them
-   *  while also needing its own copy of the schedule-wins rule. Watching the
-   *  clip catches every path into a mood, whoever asked for it. */
+   *  Deliberately not hung off tobbyEmit(), where the dialogue chooses its
+   *  moods. Several of these arrive by other routes and would have been missed
+   *  there: Tobby_Focused is set by starting a focus timer, Tobby_Thinking by
+   *  restingMood() when three things are due today, Tobby_Sleep by bedtime.
+   *  A hook in tobbyEmit would also have needed its own copy of the
+   *  schedule-wins rule. Watching the clip catches every path into a mood,
+   *  whoever asked for it. */
   _fxSeen:{}, _fxClip:'',
   fireClipEvents(){
     const spec = tbVfxSchedule();
@@ -13534,6 +13536,17 @@ const TobbyBrain = {
   stretch(){ TobbyAnim.playAction('Tobby_Stretch'); },
   play(){    this.feel('excited', 1400); TobbyAnim.playAction('Tobby_Play');
              try{ tobbyBond(TB_BOND.PLAY, 'play'); }catch(e){} },
+  /** Poked past the point of fun.
+   *
+   *  No effect is fired here. Tobby_Angry is in the rig's own clipMap, so
+   *  putting him in the clip is all it takes — the clip watcher sees the change
+   *  and draws angry_marks itself, the same way every other mood works. Firing
+   *  one by hand as well would draw it twice.
+   *
+   *  Deliberately no bond penalty: being pestered is the user playing with him,
+   *  not neglect, and taking points away for it would make an affectionate
+   *  gesture cost something. */
+  annoyed(){ this.feel('angry', 2200); TobbyAnim.playAction('Tobby_Angry'); },
 
   /* ---------- PRODUCTIVITY ---------- */
   /** The desk is not managed here on purpose: prop_workstation is scale-keyed
@@ -16392,13 +16405,38 @@ function wireTobbyInteraction(){
   };
 
   // Knocking wakes him; otherwise a tap is a hello. A drag is neither.
+  //
+  // A run of taps says something a single tap does not, so they are counted.
+  // Two in a row is affection and he shows hearts; ten is pestering and he
+  // stops finding it funny. The run only holds while the taps keep coming —
+  // pause longer than the window and the next tap starts again from one, so
+  // ten taps spread over a morning are ten hellos, not one annoyance.
+  let pokes = 0, pokedAt = 0;
+  const POKE_WINDOW = 1500, POKE_LOVE = 2, POKE_LIMIT = 10;
   body.onclick = (e)=>{
     e.stopPropagation();
     if(!TobbyRig.ready) return;
     tobbyTouchActivity();
     if(dock.dataset.justDragged){ delete dock.dataset.justDragged; return; }
-    if(TobbyBrain.sleeping){ tobbyWakeUp(); return; }
+    // Waking him is not a tap on the same run: he was asleep, and the tap that
+    // woke him should not count towards being pestered.
+    if(TobbyBrain.sleeping){ pokes = 0; tobbyWakeUp(); return; }
+
+    const now = Date.now();
+    pokes = (now - pokedAt <= POKE_WINDOW) ? pokes + 1 : 1;
+    pokedAt = now;
+
+    if(pokes >= POKE_LIMIT){
+      pokes = 0;                       // he has said his piece; the run starts over
+      try{ TobbyBrain.annoyed(); }catch(err){}
+      return;
+    }
     TobbyBrain.play();
+    // pink_hearts has no other way onto the screen: clipMap offers it for
+    // Tobby_Happy, but that clip carries its own schedule of sparkles and the
+    // schedule wins. Tobby_Play has no schedule and is not in clipMap, so
+    // nothing collides with drawing it here.
+    if(pokes === POKE_LOVE) try{ tobbyVfx('pink_hearts', { anchor:'head' }); }catch(err){}
   };
   // Double-clicking HIM is the wake gesture. It is handled here rather than by
   // the document listener, which deliberately ignores the dock — a double
