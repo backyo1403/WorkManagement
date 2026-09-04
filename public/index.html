@@ -1713,15 +1713,90 @@ a{color:inherit;}
 .toast{background:var(--text); color:var(--bg); padding:10px 16px; border-radius:11px; font-size:13px; box-shadow:var(--shadow-lg); animation:toastin .18s ease;}
 @keyframes toastin{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;}}
 
-/* ---------- Login ---------- */
-.login-wrap{min-height:100vh; width:100%; display:flex; align-items:center; justify-content:center; padding:24px;
-  background:radial-gradient(1200px 600px at 20% -10%, var(--brand-soft), transparent 60%), var(--bg);}
-.login-card{width:100%; max-width:390px; background:var(--surface); border:1px solid var(--border);
-  border-radius:20px; box-shadow:var(--shadow-lg); padding:28px 26px;}
-.login-brand{display:flex; align-items:center; gap:12px; margin-bottom:22px;}
+/* ---------- Login ----------
+   The sign-in screen is a listing of Python open in a dark editor, and the two
+   fields are two lines of that listing. Its palette is deliberately its own and
+   deliberately fixed: it is a picture of an editor, so it does not follow the
+   app's light theme any more than a screenshot would. */
+.code-login{
+  --cd-bg:#0d1017; --cd-gutter:#39424f; --cd-txt:#c9d4e3;
+  --cd-kw:#ff6ac1;      /* import, class, def, return, None      */
+  --cd-fn:#a3e635;      /* the name after def                    */
+  --cd-cls:#ffd866;     /* the name after class                  */
+  --cd-str:#e0d181;     /* strings — and what the user types     */
+  --cd-com:#5b6675;     /* comments, docstrings, placeholders    */
+  --cd-num:#c792ea;     /* numbers                               */
+  --cd-self:#fc9867;    /* self                                  */
+  --cd-attr:#7fd1e8;    /* .attribute                            */
+  --cd-bi:#5ccfe6;      /* builtins and modules                  */
+  --cd-op:#8a94a6;      /* punctuation                           */
+  --cd-accent:#5ccfe6;  /* the caret                             */
+  height:100vh; height:100dvh; width:100%; overflow:hidden;
+  background:var(--cd-bg); color:var(--cd-txt);
+  font-family:'SF Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
+  font-size:13px; line-height:1.72; letter-spacing:.01em;
+  /* Three bands: filler, the prompt, filler. The prompt keeps its natural
+     height and the two fillers absorb whatever is left, so the fields sit at
+     the middle of any viewport and the listing simply gets clipped around
+     them — never the other way round. */
+  display:flex; flex-direction:column; justify-content:center;
+}
+/* Nothing moves on this screen, including the things that are not part of it. */
+body.is-login .weather-layer{display:none;}
+.code-fill{flex:1 1 0; min-height:0; overflow:hidden;}
+.code-fill.above{display:flex; flex-direction:column; justify-content:flex-end;}
+.code-repl{flex:0 0 auto;}
+/* One line of the listing: gutter, then the code itself. */
+.cl{display:flex; align-items:baseline; white-space:pre; padding:0 18px;}
+.cl .ln{flex:0 0 auto; width:3.2em; margin-right:1.1em; text-align:right;
+  color:var(--cd-gutter); user-select:none; -webkit-user-select:none;}
+.cl .lc{flex:1 1 auto; min-width:0; overflow:hidden;}
+/* The prompt lines are the live part of the page, so they get the only
+   emphasis on screen: a hairline rule and a fractionally lighter ground. */
+.code-repl{background:rgba(255,255,255,.028);
+  border-top:1px solid rgba(255,255,255,.06); border-bottom:1px solid rgba(255,255,255,.06);
+  padding:6px 0;}
+.cl:focus-within{background:rgba(92,207,230,.07);}
+/* The field is a run of text in the listing, not a box laid over it. Every
+   border, shadow and background the browser would give an input is removed,
+   and what the user types is coloured as a string literal. */
+.code-repl input{
+  font:inherit; letter-spacing:inherit; color:var(--cd-str);
+  background:transparent; border:0; outline:0; box-shadow:none; border-radius:0;
+  padding:0; margin:0; width:min(26ch, 46vw); caret-color:var(--cd-accent);
+}
+.code-repl input::placeholder{color:var(--cd-com); opacity:1;}
+/* Autofill would otherwise paint its own background and text colour straight
+   over the illusion. */
+.code-repl input:-webkit-autofill,
+.code-repl input:-webkit-autofill:focus{
+  -webkit-text-fill-color:var(--cd-str);
+  -webkit-box-shadow:0 0 0 60px var(--cd-bg) inset;
+  caret-color:var(--cd-accent);
+}
+/* The submit control reads as a comment at the end of the session. It is a
+   real button so that Enter in either field submits the form the way the
+   browser does it — with two fields and no submit button, it would not. */
+.code-go{font:inherit; color:var(--cd-com); background:none; border:0; padding:0;
+  cursor:pointer; text-align:left;}
+.code-go:hover, .code-go:focus-visible{color:var(--cd-accent); outline:0;}
+.cd-k{color:var(--cd-kw);}      .cd-f{color:var(--cd-fn);}
+.cd-cl{color:var(--cd-cls);}    .cd-s{color:var(--cd-str);}
+.cd-c{color:var(--cd-com); font-style:italic;}
+.cd-n{color:var(--cd-num);}     .cd-se{color:var(--cd-self); font-style:italic;}
+.cd-a{color:var(--cd-attr);}    .cd-b{color:var(--cd-bi);}
+.cd-o{color:var(--cd-op);}      .cd-d{color:var(--cd-kw);}
+.cd-v{color:var(--cd-txt);}     /* a plain name — variables, parameters */
+.cd-p{color:var(--cd-bi);}      /* the >>> prompt */
+.cd-err{color:var(--cd-kw); font-weight:600;}
 .login-error{background:var(--danger-soft); color:var(--danger); border-radius:9px; padding:9px 12px;
   font-size:12.5px; font-weight:600; margin-bottom:12px;}
-.login-hint{margin-top:14px; text-align:center; font-size:11.5px; color:var(--text-3);}
+@media (max-width:700px){
+  .code-login{font-size:11.5px; line-height:1.68;}
+  .cl{padding:0 10px;}
+  .cl .ln{width:2.4em; margin-right:.7em;}
+  .code-repl input{width:min(22ch, 52vw);}
+}
 
 /* =========================================================
    RESPONSIVE — desktop ≥1100, tablet 700-1099, mobile <700.
@@ -2206,8 +2281,6 @@ body{
 .composer-pop{border-radius:22px; border:1px solid var(--hairline); box-shadow:var(--shadow-modal); padding:18px 20px 20px;}
 
 /* ---------- login ---------- */
-.login-card{border-radius:24px; border:1px solid var(--hairline); padding:32px 30px; box-shadow:var(--shadow-modal);}
-
 /* ---------- empty states ---------- */
 .empty-state{padding:52px 20px; color:var(--text-3);}
 
@@ -4140,26 +4213,162 @@ function logout(reason){
   loginError = reason || "";
   renderApp();
 }
+/* ---------- the sign-in screen is a page of source ----------
+   Everything below draws one static listing. No typing effect, no boot
+   sequence, nothing that has to finish before the page can be used: it paints
+   once and the fields are live in the same frame. */
+
+const PY_KEYWORDS = new Set(['import','from','as','class','def','return','if','elif','else',
+  'for','while','in','not','and','or','is','None','True','False','raise','try','except',
+  'finally','with','pass','del','yield','lambda','global','assert','break','continue']);
+const PY_BUILTINS = new Set(['hashlib','datetime','secrets','str','int','bool','float','len',
+  'dict','list','set','tuple','print','range','super','isinstance','type','object','Exception',
+  'ValueError','property','staticmethod','classmethod','enumerate','sorted','max','min']);
+
+/** Colour one line of Python.
+ *
+ *  A real tokeniser would be the wrong tool — this text never runs and never
+ *  changes — but hand-writing forty lines of spans is worse to read and worse
+ *  to edit than twenty lines that do it by rule. It scans the RAW source and
+ *  escapes each token as it emits it, so no pattern ever has to match against
+ *  half-built markup.
+ *
+ *  Two pieces of context are carried between tokens, which is what separates
+ *  this from colouring a word list: whether the previous word was `def` or
+ *  `class` (naming what follows), and whether a dot came immediately before
+ *  (making the next word an attribute rather than a variable). */
+function pyLine(src){
+  const RX = /(#.*)|("""[\s\S]*?"""|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")|(\d+(?:\.\d+)?)|(@[A-Za-z_]\w*)|([A-Za-z_]\w*)|(\s+)|([\s\S])/g;
+  const put = (cls, text)=> '<span class="cd-' + cls + '">' + esc(text) + '</span>';
+  let out = '', prev = '', afterDot = false, m;
+  while((m = RX.exec(src)) !== null){
+    const [, comment, str, num, decorator, word, ws, other] = m;
+    if(comment !== undefined){ out += put('c', comment); prev=''; afterDot=false; }
+    else if(str !== undefined){ out += put(str.startsWith('"""') ? 'c' : 's', str); prev=''; afterDot=false; }
+    else if(num !== undefined){ out += put('n', num); prev=''; afterDot=false; }
+    else if(decorator !== undefined){ out += put('d', decorator); prev=''; afterDot=false; }
+    else if(word !== undefined){
+      let cls = 'o';
+      if(afterDot)                   cls = 'a';
+      else if(word === 'self')       cls = 'se';
+      else if(PY_KEYWORDS.has(word)) cls = 'k';
+      else if(prev === 'def')        cls = 'f';
+      else if(prev === 'class')      cls = 'cl';
+      else if(PY_BUILTINS.has(word)) cls = 'b';
+      else if(/^[A-Z]/.test(word))   cls = 'cl';   // a class being used, not defined
+      else                           cls = 'v';
+      out += put(cls, word);
+      prev = word; afterDot = false;
+    }
+    else if(ws !== undefined){ out += esc(ws); }
+    else { out += put('o', other); afterDot = (other === '.'); if(!afterDot) prev = ''; }
+  }
+  return out;
+}
+
+/* The listing itself. It is decoration, so it does not have to run — but it
+   does have to survive being read, which is why it is a plausible access
+   layer for this app rather than filler. */
+const LOGIN_CODE_ABOVE = [
+  'import hashlib',
+  'import secrets',
+  'from datetime import datetime, timedelta',
+  '',
+  'AUDIT_LOG = "bachoffice/var/session.log"',
+  'MAX_ATTEMPTS = 5',
+  '',
+  '',
+  'class SessionGate:',
+  '    """Bach Office — cổng kiểm tra phiên làm việc."""',
+  '',
+  '    def __init__(self, node="workstation-07", ttl=timedelta(hours=8)):',
+  '        self.node = node',
+  '        self.ttl = ttl',
+  '        self.attempts = 0',
+  '        self.token = None',
+  '        self.opened_at = datetime.now()',
+  '',
+  '    def _digest(self, raw, salt):',
+  '        # Không bao giờ ghi mật khẩu thô xuống đĩa.',
+  '        return hashlib.sha256((salt + raw).encode()).hexdigest()',
+  '',
+  '    def authenticate(self, user, password):',
+  '        if self.attempts >= MAX_ATTEMPTS:',
+  '            raise AuthError("tài khoản tạm khoá")',
+  '        self.attempts += 1',
+  '        record = self.directory.lookup(user)',
+  '        if record is None:',
+  '            return False',
+  '        return self._digest(password, record.salt) == record.digest',
+  '',
+];
+const LOGIN_CODE_BELOW = [
+  '',
+  '    def issue(self, user):',
+  '        self.token = secrets.token_urlsafe(32)',
+  '        self.expires_at = datetime.now() + self.ttl',
+  '        self.audit("granted", user, node=self.node)',
+  '        return self.token',
+  '',
+  '    def revoke(self, reason="idle"):',
+  '        self.audit("revoked", self.user, reason=reason)',
+  '        self.token = None',
+  '',
+  '    @property',
+  '    def alive(self):',
+  '        return bool(self.token) and datetime.now() < self.expires_at',
+  '',
+  '    def audit(self, event, user, **fields):',
+  '        with open(AUDIT_LOG, "a") as fh:',
+  '            fh.write(f"{datetime.now():%F %T} {event} {user}\\n")',
+];
+
 function viewLogin(){
-  return `<div class="login-wrap">
-    <div class="login-card">
-      <div class="login-brand">
-        <div class="brand-mark" style="width:46px;height:46px;border-radius:14px;font-size:23px;">📘</div>
-        <div>
-          <div style="font-size:20px;font-weight:800;letter-spacing:-.02em;">${esc(STATE.company.name)}</div>
-          <div style="font-size:12px;color:var(--text-3);">${esc(STATE.company.tagline)}</div>
-        </div>
-      </div>
-      <!-- No credentials on screen: printing a working username and password
-           on the sign-in page hands them to anyone who glances at it. -->
-      <div class="field"><label>Tên đăng nhập</label>
-        <input id="login_user" type="text" autocomplete="username" placeholder="Tên đăng nhập"></div>
-      <div class="field"><label>Mật khẩu</label>
-        <input id="login_pass" type="password" autocomplete="current-password" placeholder="••••••"></div>
-      ${loginError?`<div class="login-error">⚠️ ${esc(loginError)}</div>`:''}
-      <button class="btn btn-primary" id="loginBtn" style="width:100%;justify-content:center;margin-top:4px;">🔓 Đăng nhập</button>
-    </div>
-  </div>`;
+  // One counter across the whole screen: an unbroken gutter is most of what
+  // makes this read as a single file rather than three stacked panels.
+  let n = 0;
+  const line = (html)=> '<div class="cl"><span class="ln">' + (++n) + '</span><span class="lc">' + html + '</span></div>';
+  const code = (src)=> line(pyLine(src));
+  const raw  = (html)=> line(html);
+  const sp   = (cls, text)=> '<span class="cd-' + cls + '">' + esc(text) + '</span>';
+
+  const above = LOGIN_CODE_ABOVE.map(code).join('');
+
+  // The session transcript, and inside it the only two live things on screen.
+  const prompt = (s)=> sp('p', '>>> ') + pyLine(s);
+  const repl =
+    raw(prompt('import bachoffice.auth as auth')) +
+    raw(prompt('gate = auth.SessionGate(node="workstation-07")')) +
+    raw(prompt('gate.authenticate()')) +
+    raw(sp('c', '[Bach Office] đang chờ thông tin đăng nhập…')) +
+    raw(sp('b', 'user') + sp('o', ': ') +
+        '<input id="login_user" type="text" autocomplete="username" ' +
+        'autocapitalize="off" autocorrect="off" spellcheck="false" ' +
+        'enterkeyhint="go" placeholder="&lt;tên đăng nhập&gt;">') +
+    raw(sp('b', 'password') + sp('o', ': ') +
+        '<input id="login_pass" type="password" autocomplete="current-password" ' +
+        'enterkeyhint="go" placeholder="••••••••">') +
+    // A traceback rather than a banner. Same message, same trigger — only the
+    // way it is set is different, so that a failure looks like it came from
+    // the program on screen instead of from a dialog laid over it.
+    (loginError ? (
+      raw(sp('c', 'Traceback (most recent call last):')) +
+      raw(sp('c', '  File "bachoffice/auth.py", line 58, in authenticate')) +
+      raw(sp('err', loginError === 'Sai tên đăng nhập hoặc mật khẩu' ? 'AuthError' : 'SessionExpired') +
+          sp('o', ': ') + sp('s', loginError))
+    ) : '') +
+    // "Enter" spelled out rather than ⏎: the symbol is not in the mono faces
+    // this page asks for, so it comes from a fallback at a different advance
+    // width — off the character grid here, and a blank box on a machine with
+    // no fallback that carries it.
+    raw('<button type="submit" class="code-go" id="loginBtn">' +
+        esc('# nhấn Enter để đăng nhập') + '</button>');
+
+  return '<div class="code-login">' +
+    '<div class="code-fill above">' + above + '</div>' +
+    '<form class="code-repl" id="loginForm" autocomplete="on">' + repl + '</form>' +
+    '<div class="code-fill below">' + LOGIN_CODE_BELOW.map(code).join('') + '</div>' +
+  '</div>';
 }
 function wireLogin(){
   const user = document.getElementById('login_user');
@@ -4168,8 +4377,12 @@ function wireLogin(){
     if(attemptLogin(user.value, pass.value)){ loginError=""; renderApp(); toast('Xin chào, '+currentUser().name); }
     else { loginError = "Sai tên đăng nhập hoặc mật khẩu"; renderApp(); document.getElementById('login_user').value = user.value; }
   };
-  document.getElementById('loginBtn').onclick = go;
-  [user,pass].forEach(el=> el.onkeydown = (e)=>{ if(e.key==='Enter') go(); });
+  // The fields live in a real <form> now, which is what lets Enter in either
+  // one submit, gives the phone keyboard its Go key, and lets a password
+  // manager see a pair it can fill and offer to save. One listener, on the
+  // form: hanging a second one on the inputs would run go() twice per Enter.
+  const form = document.getElementById('loginForm');
+  form.onsubmit = (e)=>{ e.preventDefault(); go(); };
   user.focus();
 }
 
@@ -4201,11 +4414,18 @@ function stopIdleWatch(){
 function renderApp(){
   if(!isLoggedIn()){
     stopIdleWatch();
+    // The weather layer lives on <body>, outside #app, so it survives this
+    // swap and drifts its sun and clouds across the sign-in screen. On the old
+    // pale card that read as background; over a page of source it is animation
+    // on a screen that is meant to be still. Hidden by class, not stopped —
+    // the weather engine keeps its own state and comes straight back.
+    document.body.classList.add('is-login');
     document.getElementById('app').innerHTML = viewLogin();
     wireLogin();
     applyLang(document.body);
     return;
   }
+  document.body.classList.remove('is-login');
   render();
   startIdleWatch();
 }
