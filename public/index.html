@@ -2945,6 +2945,32 @@ body{
 }
 .tb-propose.is-danger{border-color:var(--danger); background:var(--danger-soft);}
 .tb-thinking{color:var(--text-2); font-style:italic;}
+/* The day's conversation. Bounded and scrollable, because a long thread that
+   grows the panel pushes the ask box — the thing you opened it to use — off the
+   bottom of the screen. */
+.tb-chat-log{
+  max-height:260px; overflow-y:auto; margin-top:10px;
+  display:flex; flex-direction:column; gap:7px;
+  padding-right:2px;
+}
+.tb-turn{max-width:88%;}
+/* Your words sit right and tinted; his sit left on the surface. Side AND
+   colour, not colour alone — the thread has to stay readable when both run to
+   several lines. */
+.tb-turn.me{
+  align-self:flex-end;
+  background:var(--brand-soft); color:var(--text);
+  border-radius:12px 12px 3px 12px;
+  padding:7px 11px; font-size:12.5px; line-height:1.5; font-weight:600;
+}
+.tb-turn.him{
+  align-self:flex-start;
+  background:var(--surface-2); border:1px solid var(--border);
+  border-radius:12px 12px 12px 3px;
+  padding:8px 11px; font-size:12.5px; line-height:1.55; color:var(--text);
+}
+.tb-turn.him .tb-answer-acts{margin-top:8px;}
+.tb-turn.him .tb-propose{margin-top:9px;}
 /* One row that reads as a door rather than a button: it leads somewhere. */
 .tb-care{
   display:flex; align-items:center; gap:11px; width:100%; text-align:left;
@@ -11897,7 +11923,25 @@ function tobbyAiSystemPrompt(){
     '- Chỉ dùng id có thật trong danh sách bên dưới. TUYỆT ĐỐI không bịa id.',
     '- Nếu không chắc chắn người dùng đang nói đến bản ghi nào, đặt action = null',
     '  và hỏi lại bằng chữ trong reply.',
-    '- Không bịa số liệu. Chỉ nói những gì có trong bảng dưới đây.',
+    // The old line here was a flat "chỉ nói những gì có trong bảng dưới đây",
+    // and the model read it the way it was written: as a ban on knowing
+    // anything at all. It refused to say when Tết falls. The rule was only ever
+    // meant to stop it inventing tasks.
+    '- Về công việc/task/note/project: không bịa số liệu, chỉ nói những gì có',
+    '  trong bảng dưới đây.',
+    '- Về kiến thức chung ngoài app (ngày lễ, kiến thức phổ thông...): trả lời',
+    '  bình thường theo hiểu biết của bạn. Nếu câu hỏi cần dữ liệu cập nhật',
+    '  theo thời gian thực (giá cả, tin tức, thời tiết...), nói rõ là không có',
+    '  dữ liệu sống, đừng bịa số cụ thể.',
+    '',
+    'GỢI Ý THÊM VÀO LỊCH:',
+    '- Khi người dùng hỏi về một ngày lễ/sự kiện cụ thể có thể đặt lịch (Noel,',
+    '  Tết Dương lịch, Tết Âm lịch, ngày kỷ niệm...) và bạn nêu một ngày cụ thể',
+    '  (định dạng DD-MM-YYYY) trong reply, HÃY kèm theo action CREATE_TASK,',
+    '  title là tên sự kiện, payload.dueDate là đúng ngày đó — để người dùng',
+    '  bấm một nút là thêm được vào lịch.',
+    '- Chỉ đề xuất khi bạn THỰC SỰ chắc chắn về ngày. Nếu không chắc, đừng đoán',
+    '  bừa: nói rõ trong reply là không chắc, và để action = null.',
     '',
     tbBoardContext(),
     '',
@@ -11932,18 +11976,47 @@ function tbAiSpend(){
 }
 
 /* ---------- the conversation ----------
-   In memory, for this panel session only. Closing the panel forgets it: a
-   companion who remembers yesterday's half-question is worse than one who
-   starts fresh, and nothing here is worth persisting. */
-let tbAiHistory = [];
-function tobbyAiReset(){ tbAiHistory = []; }
+   Kept for the DAY, not for the panel. Closing the window and opening it again
+   to find the answer gone is the kind of small loss that stops people asking;
+   a conversation that outlives the night is a different problem, so it is
+   scoped to today and simply not read tomorrow.
+
+   Stored rather than held in a variable because the panel is destroyed and
+   rebuilt every time it opens. localStorage is the right home: it is chat, not
+   data — nothing here belongs in the state the app syncs. */
+const TB_CHAT_LOG_KEY = 'tobby.chatLog.v1';
+const TB_CHAT_LOG_MAX_TURNS = 40;   // enough to scroll back through, bounded
+
+/** Today's thread. A log from another day reads as empty; the old key is left
+ *  where it is rather than swept, because the next save overwrites it anyway. */
+function tbChatLoad(){
+  try{
+    const v = JSON.parse(localStorage.getItem(TB_CHAT_LOG_KEY) || 'null');
+    if(v && v.date === tbToday() && Array.isArray(v.turns)) return v;
+  }catch(e){}
+  return { date: tbToday(), turns: [] };
+}
+function tbChatSave(log){
+  log.turns = log.turns.slice(-TB_CHAT_LOG_MAX_TURNS);
+  try{ localStorage.setItem(TB_CHAT_LOG_KEY, JSON.stringify(log)); }catch(e){}
+}
+
+/** What the model is given as context, built from the same log the user can
+ *  see. One source, so the thread on screen and the thread the model reads
+ *  cannot drift apart. */
+function tbChatHistory(log){
+  return log.turns
+    .filter(x=> x.text && !x.thinking)
+    .slice(-AI_CONFIG.historyMax)
+    .map(x=>({ role: x.role === 'tobby' ? 'model' : 'user', text: x.text }));
+}
 
 /**
  * Ask the model. Returns the same `{text, ...}` shape tobbyAsk() returns, so
  * the panel renders it with no special case, plus `proposal` when the model
  * has suggested something the allowlist accepts.
  */
-async function tobbyAskAI(text){
+async function tobbyAskAI(text, history){
   const fallback = { text: TB_L(
     'Mình trả lời được về: việc nên làm, việc gấp, việc quá hạn, việc đã xong, tuần này, việc nặng nhất.',
     'I can answer: what to do next, what is urgent, what is overdue, what is done, this week, the heaviest task.') };
@@ -11953,13 +12026,12 @@ async function tobbyAskAI(text){
     'That is a lot of questions for one day — ask me again tomorrow 😅') };
   try{
     tbAiSpend();
-    const out = await geminiService.sendMessage(tobbyAiSystemPrompt(), tbAiHistory, text);
+    const out = await geminiService.sendMessage(tobbyAiSystemPrompt(), history || [], text);
     if(!out) return fallback;
     const reply = String(out.reply || '').trim();
     if(!reply) return fallback;
-    // Keep the thread short. historyMax counts turns, and each turn is a pair.
-    tbAiHistory.push({ role:'user', text }, { role:'model', text: reply });
-    while(tbAiHistory.length > AI_CONFIG.historyMax) tbAiHistory.shift();
+    // The caller owns the thread now — it is the same log the user reads, so
+    // there is no second copy here to fall out of step with it.
     const res = { text: reply, ai:true };
     // A proposal only survives if the allowlist accepts it. A refused one is
     // simply not shown: the reply still stands, and the user is not shown a
@@ -11975,6 +12047,48 @@ async function tobbyAskAI(text){
   }
 }
 
+/* ---------- he types while you do ----------
+   Tobby_Typing is one of the three clips that bring prop_workstation with
+   them, so a desk appears under his paws for as long as the conversation is
+   live. It is a one-shot, so it is re-triggered rather than looped — pulsing
+   it keeps him at it without a second animation layer to unwind afterwards. */
+let tbTypingUntil = 0, tbTypingTimer = 0;
+
+/** Keep him typing until `ms` from now. Calling it again extends the run. */
+function tobbyTypingPulse(ms){
+  if(!TobbyRig.ready || TobbyBrain.sleeping) return;
+  tbTypingUntil = Math.max(tbTypingUntil, Date.now() + (ms || 1800));
+  if(!tbTypingTimer) tobbyTypingBeat();
+}
+
+/** One beat of typing, re-triggered just before the clip ends.
+ *
+ *  Tobby_Typing is in TB_ONCE, so _act() gives it LoopOnce with
+ *  clampWhenFinished: holding it for thirty seconds would freeze him on the
+ *  last frame — a photograph of a dog at a desk rather than a dog working.
+ *  Re-triggering a little early is what makes it read as continuous.
+ *
+ *  Deliberately no feel('working') here. That sets Tobby_Working as the BASE,
+ *  and Tobby_Working is in TB_POSTURE — the set a mood may not replace — so
+ *  relax() could never clear it afterwards and he stayed at the desk for the
+ *  rest of the session. The action alone brings the desk with it (the clip
+ *  keys prop_workstation) and endAction() puts back whatever he was doing. */
+function tobbyTypingBeat(){
+  if(Date.now() >= tbTypingUntil){ tobbyTypingStop(); return; }
+  const c = TobbyRig.clips && TobbyRig.clips['Tobby_Typing'];
+  const dur = c ? c.duration * 1000 : 1200;
+  try{ TobbyAnim.playAction('Tobby_Typing', dur); }catch(e){}
+  tbTypingTimer = setTimeout(tobbyTypingBeat, Math.max(220, dur - 130));
+}
+
+function tobbyTypingStop(){
+  clearTimeout(tbTypingTimer); tbTypingTimer = 0; tbTypingUntil = 0;
+  try{
+    if(TobbyAnim.actionName === 'Tobby_Typing') TobbyAnim.endAction();
+    TobbyBrain.relax();
+  }catch(e){}
+}
+
 /** The proposal, in words rather than JSON. Nobody should be asked to approve
  *  a payload they have to parse. */
 function tobbyActionSummary(a){
@@ -11984,7 +12098,13 @@ function tobbyActionSummary(a){
   const projName = ()=>{ const x = (STATE.projects||[]).find(y=>y.id===p.id); return x ? (x.name||x.title||'dự án') : ''; };
   const q = (s)=> '“' + s + '”';
   switch(a.type){
-    case 'CREATE_TASK':       return TB_L('tạo nhiệm vụ ' + q(p.title), 'create task ' + q(p.title));
+    // The date is the whole point when the proposal came out of "when is
+    // Christmas" — approving "tạo nhiệm vụ Noel" without seeing which Noel is
+    // approving something you cannot check.
+    case 'CREATE_TASK': {
+      const when = p.dueDate ? ' — ' + fmtDate(p.dueDate) : '';
+      return TB_L('tạo nhiệm vụ ' + q(p.title) + when, 'create task ' + q(p.title) + when);
+    }
     case 'UPDATE_TASK':       return TB_L('sửa nhiệm vụ ' + q(taskName()), 'update ' + q(taskName()));
     case 'COMPLETE_TASK':     return TB_L('hoàn thành ' + q(taskName()), 'complete ' + q(taskName()));
     case 'DELETE_TASK':       return TB_L('xoá nhiệm vụ ' + q(taskName()), 'delete ' + q(taskName()));
@@ -14225,16 +14345,32 @@ function tobbyAsk(text){
    --------------------------------------------------------- */
 function tobbyPanel(){
   const L2 = TB_L;
-  let answer = null;
-  const pop = tobbyPopup('\ud83d\udc36 Tobby');
+  const pop = tobbyPopup('\ud83d\udc36 Tobby', ()=> tobbyTypingStop());
   const overlay = pop.el;
   const close = pop.close;
-  // A fresh panel is a fresh conversation. Nothing about a half-finished
-  // question from an hour ago improves the next answer.
-  tobbyAiReset();
+  // Today's thread, read when the panel opens. Nothing is cleared on a timer:
+  // a log from yesterday simply does not load, which is the whole of the rule.
+  let chatLog = tbChatLoad();
   // Whether a destructive proposal has been pressed once already. Lives here,
   // not on the proposal, so re-drawing for any other reason disarms it.
   let aiArmed = false;
+
+  /** Add a turn and redraw. Any new turn disarms a pending delete — the armed
+   *  state belongs to a button that is about to stop being the last one. */
+  function pushTurn(turn){
+    chatLog.turns.push(Object.assign({ at: Date.now() }, turn));
+    tbChatSave(chatLog);
+    aiArmed = false;
+    draw();
+  }
+  /** Swap the last turn — used to replace “Tobby đang nghĩ…” with the answer
+   *  rather than leaving both of them in the thread. */
+  function replaceLastTurn(turn){
+    chatLog.turns[chatLog.turns.length - 1] = Object.assign({ at: Date.now() }, turn);
+    tbChatSave(chatLog);
+    aiArmed = false;
+    draw();
+  }
 
   function draw(){
     const g = TobbyGrowth.progress();
@@ -14256,30 +14392,38 @@ function tobbyPanel(){
           ' \u00b7 ' + L2('quen nhau ' + TobbyGrowth.ageDays() + ' ng\u00e0y',
                           'known you ' + TobbyGrowth.ageDays() + ' days') + '</div>' +
 
-        (answer ? '<div class="tb-answer">' + esc(answer.text).replace(/\n/g,'<br>') +
-          (answer.task ? '<div class="tb-answer-acts">' +
-            '<button data-a="open">' + L2('M\u1edf nhi\u1ec7m v\u1ee5','Open task') + '</button>' +
-            '<button data-a="focus">' + L2('B\u1eaft \u0111\u1ea7u Focus','Start focus') + '</button>' +
-          '</div>' : '') +
-          // Note hits reuse the same button row the task answer already uses,
-          // so the panel gains an ability without gaining a look.
-          (answer.notes ? '<div class="tb-answer-acts">' + answer.notes.map(n=>
-            '<button data-note="' + esc(n.id) + '" title="' + esc(n.excerpt) + '">' +
-            esc(n.title) + '</button>').join('') + '</div>' : '') +
-          // The model may propose; only a press applies. A destructive one
-          // needs two, and says so on the button rather than in a dialog the
-          // eye skips.
-          (answer.proposal ? '<div class="tb-propose' + (answer.proposal.destructive ? ' is-danger' : '') + '">' +
-            L2('Tobby đề xuất: ','Tobby suggests: ') + '<b>' +
-            esc(tobbyActionSummary(answer.proposal.action)) + '</b>.' +
-            '<div class="tb-answer-acts">' +
-              '<button data-ai-apply' + (aiArmed ? ' class="danger"' : '') + '>' +
-              (aiArmed ? L2('Bấm lần nữa để xoá thật','Press again to really delete')
-                       : L2('Áp dụng','Apply')) + '</button>' +
-              '<button data-ai-skip>' + L2('Bỏ qua','Skip') + '</button>' +
-            '</div>' +
-          '</div>' : '') +
-          '</div>' : '') +
+        (chatLog.turns.length ? '<div class="tb-chat-log" data-chat-log>' +
+          chatLog.turns.map((turn, i)=>{
+            if(turn.role !== 'tobby')
+              return '<div class="tb-turn me">' + esc(turn.text).replace(/\n/g,'<br>') + '</div>';
+            const last = i === chatLog.turns.length - 1;
+            return '<div class="tb-turn him">' + esc(turn.text).replace(/\n/g,'<br>') +
+              // Every button carries its own id, so a thread of any length
+              // wires up without a handler having to work out which turn it
+              // is standing on.
+              (turn.task ? '<div class="tb-answer-acts">' +
+                '<button data-task-open="' + esc(turn.task.id) + '">' + L2('Mở nhiệm vụ','Open task') + '</button>' +
+                '<button data-task-focus="' + esc(turn.task.id) + '">' + L2('Bắt đầu Focus','Start focus') + '</button>' +
+              '</div>' : '') +
+              (turn.notes ? '<div class="tb-answer-acts">' + turn.notes.map(n=>
+                '<button data-note="' + esc(n.id) + '" title="' + esc(n.excerpt) + '">' +
+                esc(n.title) + '</button>').join('') + '</div>' : '') +
+              // Live buttons only on the newest turn. An Apply sitting in the
+              // scrollback is a change waiting to be made by accident, against
+              // a board that has moved on since it was offered.
+              (turn.proposal && last ? '<div class="tb-propose' + (turn.proposal.destructive ? ' is-danger' : '') + '">' +
+                L2('Tobby đề xuất: ','Tobby suggests: ') + '<b>' +
+                esc(tobbyActionSummary(turn.proposal.action)) + '</b>.' +
+                '<div class="tb-answer-acts">' +
+                  '<button data-ai-apply' + (aiArmed ? ' class="danger"' : '') + '>' +
+                  (aiArmed ? L2('Bấm lần nữa để xoá thật','Press again to really delete')
+                           : L2('Áp dụng','Apply')) + '</button>' +
+                  '<button data-ai-skip>' + L2('Bỏ qua','Skip') + '</button>' +
+                '</div>' +
+              '</div>' : '') +
+            '</div>';
+          }).join('') +
+        '</div>' : '') +
 
         '<div class="tb-sec">' + L2('H\u1ecfi Tobby','Ask Tobby') + '</div>' +
         '<form class="tb-ask" data-ask>' +
@@ -14311,40 +14455,60 @@ function tobbyPanel(){
         '</button>';
     wire();
     pop.place();          // the height changed, so where it sits does too
+    // Always to the newest line. Nothing arrives here unprompted — every turn
+    // is one the user just caused — so there is no reading position to protect.
+    const logEl = overlay.querySelector('[data-chat-log]');
+    if(logEl) logEl.scrollTop = logEl.scrollHeight;
   }
 
   function wire(){
-    const show = (r)=>{ answer = r; draw(); };
+    const say = (r)=> pushTurn(Object.assign({ role:'tobby' }, r));
     overlay.querySelectorAll('[data-q-key]').forEach(b=> b.onclick = (e)=>{
-      e.stopPropagation(); show(tobbyAnswer(b.dataset.qKey));
+      e.stopPropagation();
+      // The chip's own label is what the user 'said'. An answer with no
+      // question above it reads as coming from nowhere.
+      pushTurn({ role:'user', text: b.textContent.trim() });
+      say(tobbyAnswer(b.dataset.qKey));
     });
+    const input = overlay.querySelector('[data-q]');
+    // He types while you type. Tobby_Typing is one of the three clips that
+    // bring prop_workstation with them, so a desk appears under his paws for
+    // as long as the conversation is live.
+    if(input) input.oninput = ()=> tobbyTypingPulse(1800);
     const form = overlay.querySelector('[data-ask]');
     if(form) form.onsubmit = (e)=>{
       e.preventDefault(); e.stopPropagation();
       const q = overlay.querySelector('[data-q]').value.trim();
       if(!q) return;
+      pushTurn({ role:'user', text:q });
       const r = tobbyAsk(q);
       // Matched a question it already knows: answer instantly and spend
       // nothing. Only the ones it cannot place are worth a model.
-      if(!r.fallback || !aiEnabled()){ show(r); return; }
-      show({ text: TB_L('Tobby đang nghĩ…','Tobby is thinking…'), thinking:true });
-      tobbyAskAI(q).then(res=> show(res)).catch(()=> show(r));
+      if(!r.fallback || !aiEnabled()){ tobbyTypingStop(); say(r); return; }
+      tobbyTypingPulse(30000);          // he keeps at it until the answer lands
+      say({ text: TB_L('Tobby đang nghĩ…','Tobby is thinking…'), thinking:true });
+      const history = tbChatHistory(chatLog);
+      tobbyAskAI(q, history)
+        .then(res=>{ tobbyTypingStop(); replaceLastTurn(Object.assign({ role:'tobby' }, res)); })
+        .catch(()=>{ tobbyTypingStop(); replaceLastTurn(Object.assign({ role:'tobby' }, r)); });
     };
-    const acts = overlay.querySelector('.tb-answer-acts');
-    if(acts && answer && answer.task){
-      acts.querySelector('[data-a="open"]').onclick = (e)=>{ e.stopPropagation(); close(); openTaskModal(answer.task.id); };
-      acts.querySelector('[data-a="focus"]').onclick = (e)=>{ e.stopPropagation(); close(); toggleTimer(answer.task.id); };
-    }
+    overlay.querySelectorAll('[data-task-open]').forEach(b=> b.onclick = (e)=>{
+      e.stopPropagation(); close(); openTaskModal(b.dataset.taskOpen);
+    });
+    overlay.querySelectorAll('[data-task-focus]').forEach(b=> b.onclick = (e)=>{
+      e.stopPropagation(); close(); toggleTimer(b.dataset.taskFocus);
+    });
     overlay.querySelectorAll('[data-note]').forEach(b=> b.onclick = (e)=>{
       e.stopPropagation(); close();
       const id = b.dataset.note;
       VIEW = 'notes'; render();
       if(typeof openNote === 'function') openNote(id);
     });
+    const last = chatLog.turns[chatLog.turns.length - 1];
     const apply = overlay.querySelector('[data-ai-apply]');
     if(apply) apply.onclick = (e)=>{
       e.stopPropagation();
-      const prop = answer && answer.proposal;
+      const prop = last && last.proposal;
       if(!prop) return;
       // Two presses for anything destructive. The first only arms it, and the
       // button says what the second one will do — a dialog at this size is
@@ -14353,17 +14517,22 @@ function tobbyPanel(){
       // Re-validated at the moment of the press, not at the moment of the
       // proposal: the board may have moved on in between.
       const v = validateAIAction(prop.action);
-      if(!v.ok){ aiArmed = false; show({ text: TB_L('Việc đó không còn đúng nữa rồi.','That no longer applies.') }); return; }
+      if(!v.ok){
+        delete last.proposal;
+        say({ text: TB_L('Việc đó không còn đúng nữa rồi.','That no longer applies.') });
+        return;
+      }
       const out = executeAIAction(prop.action);
-      aiArmed = false;
-      show({ text: (out && out.message) || TB_L('Xong rồi.','Done.') });
+      delete last.proposal;            // spent — it must not be offered twice
+      say({ text: (out && out.message) || TB_L('Xong rồi.','Done.') });
       try{ render(); }catch(err){}
     };
     const skip = overlay.querySelector('[data-ai-skip]');
     if(skip) skip.onclick = (e)=>{
       e.stopPropagation();
       aiArmed = false;
-      if(answer) delete answer.proposal;
+      if(last) delete last.proposal;
+      tbChatSave(chatLog);
       draw();
     };
     overlay.querySelectorAll('[data-do]').forEach(b=> b.onclick = (e)=>{
