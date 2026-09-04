@@ -3086,6 +3086,37 @@ function eventCoversDay(t, d){
   const b = new Date(a);  b.setDate(b.getDate()+1);
   return r.start < b && r.end > a;
 }
+/** Close out every event whose day has gone by.
+ *
+ *  An event is a status, not a job you tick off: a meeting that happened is
+ *  finished by the clock, and nobody comes back afterwards to mark it so. Left
+ *  alone they pile up as open work and make the board read as a backlog of
+ *  things nobody did.
+ *
+ *  The day rolling over is the trigger, not the end time — an event that
+ *  finishes at ten this morning is still today's event until tomorrow, which
+ *  is what "auto qua ngày" means and also what keeps it off the screen while
+ *  the user is still in the meeting.
+ *
+ *  Undated events are left alone: there is no day to have passed. Everything
+ *  goes through updateTask() so the completion, the timestamp and the activity
+ *  line are written the same way a person clicking the checkbox would write
+ *  them — but not through tobbyOnTaskDone(), because an event lapsing is not
+ *  an achievement and must not pay XP. */
+function sweepFinishedEvents(){
+  if(!STATE || !Array.isArray(STATE.tasks)) return 0;
+  const today = new Date(); today.setHours(0,0,0,0);
+  let n = 0;
+  STATE.tasks.slice().forEach(t=>{
+    if(!isEvent(t) || t.archived) return;
+    const r = eventRange(t);
+    const end = r ? r.end : (isFiniteDate(t.deadline) ? new Date(t.deadline) : null);
+    if(!end || end >= today) return;
+    updateTask(t.id, { status:'Hoàn thành' }, 'Sự kiện đã qua — tự động hoàn thành');
+    n++;
+  });
+  return n;
+}
 const TASK_PRIORITIES = [["ASAP","ASAP"],["Cao","CAO"],["Trung bình","TB"],["Thấp","THẤP"]];
 /* Seven-step red scale: the nearer the deadline, the deeper the red. */
 const DUE_SCALE = [
@@ -11768,6 +11799,22 @@ function aiPickNextTask(){
   };
   return open.slice().sort((a,b)=> score(b)-score(a))[0];
 }
+/** A date out of the model, read the way a person means it.
+ *
+ *  The model answers holidays with a bare YYYY-MM-DD, and new Date() reads
+ *  that as midnight UTC. East of Greenwich that only shifts the clock; west of
+ *  it the deadline lands on the day BEFORE the one Tobby just named — ask for
+ *  Christmas in New York and get a task due the 24th. A bare date has no time
+ *  in it, so it is built as local midnight; anything carrying a time is left
+ *  alone, because then the offset is the sender's to state. */
+function aiParseDate(v){
+  if(!v) return null;
+  const s = String(v).trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  const d = m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(s);
+  return isNaN(d) ? null : d.toISOString();
+}
+
 /** Run a validated action through the EXISTING Bach Office functions. No new
  *  task or note system — this only calls what the app already does. */
 function executeAIAction(a){
@@ -11780,11 +11827,10 @@ function executeAIAction(a){
     // resolves the work group and persists on its own — a parallel creation
     // path here would drift from the real one.
     case 'CREATE_TASK': {
-      const okDate = (v)=>{ const d = v ? new Date(v) : null; return (d && !isNaN(d)) ? d.toISOString() : null; };
       const t = addTask({
         title: String(p.title).slice(0,200),
-        deadline: okDate(p.dueDate),
-        start: okDate(p.start),
+        deadline: aiParseDate(p.dueDate),
+        start: aiParseDate(p.start),
         priority: aiValidPriority(p.priority) ? p.priority : 'Trung bình',
         status: TASK_STATUSES.includes(p.status) ? p.status : 'Cần làm',
         projectId: (p.projectId && STATE.projects.some(x=>x.id===p.projectId)) ? p.projectId : null,
@@ -11796,7 +11842,7 @@ function executeAIAction(a){
       const t = findTask(); if(!t) return { ok:false, message:'not found' };
       const patch = {};
       if(p.title) patch.title = String(p.title).slice(0,200);
-      if(p.dueDate){ const d = new Date(p.dueDate); if(!isNaN(d)) patch.deadline = d.toISOString(); }
+      if(p.dueDate){ const d = aiParseDate(p.dueDate); if(d) patch.deadline = d; }
       if(aiValidPriority(p.priority)) patch.priority = p.priority;
       if(p.status && TASK_STATUSES.includes(p.status)) patch.status = p.status;
       if(!Object.keys(patch).length) return { ok:false, message:'nothing to change' };
@@ -12054,10 +12100,37 @@ async function tobbyAskAI(text, history){
    it keeps him at it without a second animation layer to unwind afterwards. */
 let tbTypingUntil = 0, tbTypingTimer = 0;
 
-/** Keep him typing until `ms` from now. Calling it again extends the run. */
+// How long after the last keystroke he keeps going. Typing has gaps in it —
+// a thought, a backspace, a look at the screen — and stopping the clip inside
+// one of them reads as a stutter rather than as the user having finished.
+const TB_TYPE_GRACE_MS = 1600;
+// And how long he stays at the desk after answering, so the reply and the dog
+// who wrote it are on screen together for a moment.
+const TB_TYPE_TAIL_MS = 5000;
+
+/** Keep him typing until `ms` from now. Calling it again extends the run, so
+ *  every keystroke pushes the finish line back and he types for exactly as
+ *  long as the user does, plus the grace below. */
 function tobbyTypingPulse(ms){
   if(!TobbyRig.ready || TobbyBrain.sleeping) return;
-  tbTypingUntil = Math.max(tbTypingUntil, Date.now() + (ms || 1800));
+  tbTypingUntil = Math.max(tbTypingUntil, Date.now() + (ms || TB_TYPE_GRACE_MS));
+  if(!tbTypingTimer) tobbyTypingBeat();
+}
+
+/** Wind him down `ms` from now, whatever was booked before.
+ *
+ *  Not the same as a pulse: waiting for the model books a long run (nobody
+ *  knows how long it will think), and when the answer lands that booking has
+ *  to be cut SHORT, not extended. A pulse takes the later of the two and would
+ *  leave him typing at a desk for another twenty seconds after he had spoken.
+ *  A keystroke after this still extends it — the user typing again outranks
+ *  a tail that is only running out the clock. */
+function tobbyTypingTail(ms){
+  // Asleep mid-answer: end it rather than shorten it, or the beat would keep
+  // sitting a sleeping dog up at his desk until the tail ran out.
+  if(TobbyBrain.sleeping){ tobbyTypingStop(); return; }
+  if(!TobbyRig.ready) return;
+  tbTypingUntil = Date.now() + (ms || TB_TYPE_TAIL_MS);
   if(!tbTypingTimer) tobbyTypingBeat();
 }
 
@@ -12102,7 +12175,10 @@ function tobbyActionSummary(a){
     // Christmas" — approving "tạo nhiệm vụ Noel" without seeing which Noel is
     // approving something you cannot check.
     case 'CREATE_TASK': {
-      const when = p.dueDate ? ' — ' + fmtDate(p.dueDate) : '';
+      // Read through the same parser the task will be built with, or the date
+      // on the button and the date on the task could name different days.
+      const d = aiParseDate(p.dueDate);
+      const when = d ? ' — ' + fmtDate(d) : '';
       return TB_L('tạo nhiệm vụ ' + q(p.title) + when, 'create task ' + q(p.title) + when);
     }
     case 'UPDATE_TASK':       return TB_L('sửa nhiệm vụ ' + q(taskName()), 'update ' + q(taskName()));
@@ -14474,7 +14550,7 @@ function tobbyPanel(){
     // He types while you type. Tobby_Typing is one of the three clips that
     // bring prop_workstation with them, so a desk appears under his paws for
     // as long as the conversation is live.
-    if(input) input.oninput = ()=> tobbyTypingPulse(1800);
+    if(input) input.oninput = ()=> tobbyTypingPulse();
     const form = overlay.querySelector('[data-ask]');
     if(form) form.onsubmit = (e)=>{
       e.preventDefault(); e.stopPropagation();
@@ -14484,13 +14560,16 @@ function tobbyPanel(){
       const r = tobbyAsk(q);
       // Matched a question it already knows: answer instantly and spend
       // nothing. Only the ones it cannot place are worth a model.
-      if(!r.fallback || !aiEnabled()){ tobbyTypingStop(); say(r); return; }
+      // Answering is the end of a turn, not the end of the conversation: he
+      // stays at the desk a few seconds longer so the reply and the dog who
+      // wrote it are on screen together.
+      if(!r.fallback || !aiEnabled()){ tobbyTypingTail(); say(r); return; }
       tobbyTypingPulse(30000);          // he keeps at it until the answer lands
       say({ text: TB_L('Tobby đang nghĩ…','Tobby is thinking…'), thinking:true });
       const history = tbChatHistory(chatLog);
       tobbyAskAI(q, history)
-        .then(res=>{ tobbyTypingStop(); replaceLastTurn(Object.assign({ role:'tobby' }, res)); })
-        .catch(()=>{ tobbyTypingStop(); replaceLastTurn(Object.assign({ role:'tobby' }, r)); });
+        .then(res=>{ tobbyTypingTail(); replaceLastTurn(Object.assign({ role:'tobby' }, res)); })
+        .catch(()=>{ tobbyTypingTail(); replaceLastTurn(Object.assign({ role:'tobby' }, r)); });
     };
     overlay.querySelectorAll('[data-task-open]').forEach(b=> b.onclick = (e)=>{
       e.stopPropagation(); close(); openTaskModal(b.dataset.taskOpen);
@@ -14526,6 +14605,14 @@ function tobbyPanel(){
       delete last.proposal;            // spent — it must not be offered twice
       say({ text: (out && out.message) || TB_L('Xong rồi.','Done.') });
       try{ render(); }catch(err){}
+      // A task Tobby made is a draft, not a filed one. He has a title and a
+      // date and nothing else — no project, no priority worth the name, no
+      // description — so hand it straight to the editor rather than leaving
+      // the user to find the new row and open it themselves.
+      if(prop.action.type === 'CREATE_TASK' && out && out.ok && out.task){
+        close();
+        try{ openTaskModal(out.task.id); }catch(err){}
+      }
     };
     const skip = overlay.querySelector('[data-ai-skip]');
     if(skip) skip.onclick = (e)=>{
@@ -15655,6 +15742,9 @@ function wireTobbyInteraction(){
   document.getElementById('app').innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:var(--text-2);">Đang tải Bach Office…</div>`;
   STATE = loadState();
   normalizeState();
+  // Before the first paint, so yesterday's events are never drawn as open work
+  // and then corrected a frame later.
+  try{ sweepFinishedEvents(); }catch(e){ console.warn('events', e); }
   applyGroupTheme();
   startLangObserver();
   // Restore an in-tab session so a refresh doesn't force a re-login.
@@ -15679,6 +15769,9 @@ function wireTobbyInteraction(){
     // or a failed load, and starts the clip for one the rig missed. Without it
     // a single orphaned meal blocks feeding until someone clears the site data.
     try{ tobbyResumeMeal(); }catch(e){}
+    // Midnight arrives while the tab is open, too. Only repaints when something
+    // actually changed, so this is a no-op on every minute but one.
+    try{ if(sweepFinishedEvents()) render(); }catch(e){}
   }, 60*1000);
 })();
 </script>
