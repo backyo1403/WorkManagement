@@ -12272,7 +12272,7 @@ function settingsAmbiencePanel(){
       <button class="pill-toggle ${vOn?'active':''}" data-voice-tts-set="1">Bật</button>
       <button class="pill-toggle ${!vOn?'active':''}" data-voice-tts-set="0">Tắt</button>
     </div>
-    ${vOn?`<div style="font-size:12px;color:var(--text-3);margin-bottom:8px;">${TB_L('Ngôn ngữ Tobby nghe và nói — không liên quan tới ngôn ngữ giao diện','The language Tobby listens and speaks in — separate from the interface language')}</div>
+    ${vOn?`<div style="font-size:12px;color:var(--text-3);margin-bottom:8px;">${TB_L('Ngôn ngữ của Tobby — cả câu trả lời lẫn giọng đọc, đặt riêng với ngôn ngữ giao diện','Tobby’s language — his replies and his voice both, set separately from the interface')}</div>
     <div class="pill-toggle-row" style="margin-bottom:14px;">
       <button class="pill-toggle ${vLang==='vi'?'active':''}" data-voice-lang-set="vi">Tiếng Việt</button>
       <button class="pill-toggle ${vLang==='en'?'active':''}" data-voice-lang-set="en">English</button>
@@ -15444,7 +15444,7 @@ function tobbyPickNext(){
   return open.slice().sort((a,b)=> score(b)-score(a))[0];
 }
 function tobbyAnswer(key){
-  const L2 = TB_L;
+  const L2 = TB_SAY;
   const open = activeTasks().filter(t=> t.status!=='Hoàn thành' && !isFrozen(t));
   const overdue = open.filter(isOverdue);
   const today = activeTasks().filter(t=> t.status==='Hoàn thành' && isSameDay(t.completedAt));
@@ -15564,10 +15564,10 @@ function tobbyAsk(text){
     const hits = tobbyFindNotes(term);
     if(!hits.length){
       const em = tobbyEmit('note_not_found', { vars:{ q: term } });
-      return { text: em ? em.text : TB_L("Không tìm thấy note nào.",'No notes found.') };
+      return { text: em ? em.text : TB_SAY("Không tìm thấy note nào.",'No notes found.') };
     }
     return {
-      text: TB_L('Tìm thấy ' + hits.length + ' ghi chú có “' + term + '”:',
+      text: TB_SAY('Tìm thấy ' + hits.length + ' ghi chú có “' + term + '”:',
                  'Found ' + hits.length + ' notes with “' + term + '”:'),
       notes: hits,
     };
@@ -15584,7 +15584,7 @@ function tobbyAsk(text){
   // Nothing matched. `fallback` marks it so the caller knows this is the point
   // where a real model is worth asking — the static line stays as the answer
   // if there is no model, no budget, or no network.
-  if(!hit) return { fallback:true, text: TB_L(
+  if(!hit) return { fallback:true, text: TB_SAY(
     'Mình trả lời được về: việc nên làm, việc gấp, việc quá hạn, việc đã xong, tuần này, việc nặng nhất.',
     'I can answer: what to do next, what is urgent, what is overdue, what is done, this week, the heaviest task.') };
   return tobbyAnswer(hit);
@@ -15693,9 +15693,31 @@ function tobbyVoicePrefs(){
     voiceURI: v.voiceURI || '',             // empty = pick one automatically
   };
 }
+/** Tobby's OWN language — what he says and writes, not what the menus around
+ *  him say.
+ *
+ *  The setting in his card is worded as the language he listens and speaks in,
+ *  and it used to steer only the recogniser and the reader. That left the case
+ *  this exists to fix: an English voice reading Vietnamese sentences aloud,
+ *  mispronouncing every one of them, because his words were still coming from
+ *  the interface language. If he is set to speak English then English is what
+ *  there is to speak, so his lines come from the English pool too.
+ *
+ *  It only applies while reading aloud is on, because that is the only time the
+ *  control is on screen. With it off there is nothing for anyone to have set,
+ *  and he follows the interface like the rest of the app. */
+function tobbyLang(){
+  const v = (STATE.settings && STATE.settings.tobbyVoice) || null;
+  if(v && v.enabled === true && (v.lang === 'en' || v.lang === 'vi')) return v.lang;
+  return LANG === 'en' ? 'en' : 'vi';
+}
+/** TB_L, but for the things Tobby himself says. The panel's own buttons and
+ *  headings stay on TB_L: they are the app's furniture, not his voice. */
+function TB_SAY(vi, en){ return tobbyLang() === 'en' ? en : vi; }
+
 /** His speaking language, which is NOT the interface language. Someone can run
  *  the app in English and still want to talk to the dog in Vietnamese. */
-function tobbyVoiceTag(){ return tobbyVoicePrefs().lang === 'en' ? 'en-US' : 'vi-VN'; }
+function tobbyVoiceTag(){ return tobbyLang() === 'en' ? 'en-US' : 'vi-VN'; }
 function tobbyVoiceList(){
   try{ return window.speechSynthesis ? (speechSynthesis.getVoices() || []) : []; }
   catch(e){ return []; }
@@ -16898,7 +16920,7 @@ const TB_OPENERS_EN = [
  *  when an entry has no English of its own, so a missed translation is a line
  *  in the wrong language rather than an empty bubble. */
 function tbLines(def){
-  return (LANG === 'en' && def && def.en && def.en.length) ? def.en : (def ? def.lines : null);
+  return (tobbyLang() === 'en' && def && def.en && def.en.length) ? def.en : (def ? def.lines : null);
 }
 
 /** Which line each event used last, so it never repeats back to back. */
@@ -16939,7 +16961,7 @@ function tbNameList(rows, max){
   const head = list.slice(0, n).map(r=> tbQuoteName(r.title || r.name || r.text)).filter(Boolean);
   if(!head.length) return '';
   const rest = list.length - head.length;
-  if(rest > 0) head.push(TB_L('và ' + rest + ' việc khác', 'and ' + rest + ' more'));
+  if(rest > 0) head.push(TB_SAY('và ' + rest + ' việc khác', 'and ' + rest + ' more'));
   return head.join(', ');
 }
 /** Fill {task} and {project} for a line that names one.
@@ -16969,7 +16991,7 @@ function tbFillSubject(text, o){
   return text.replace(/\{(task|project)\}/g, (whole, k)=>{
     const named = tbSubjectName(k === 'project' ? (o.project || o.projectId) : (o.task || o.taskId), k);
     if(named) return named;
-    return k === 'project' ? TB_L('này','this one') : TB_L('việc này','this one');
+    return k === 'project' ? TB_SAY('này','this one') : TB_SAY('việc này','this one');
   });
 }
 
@@ -16997,7 +17019,7 @@ function tobbyEmit(id, opt){
   // name cannot land inside the sentence glued on in front of it.
   text = tbFillSubject(text, o);
   if(o.opener){
-    const pool = LANG === 'en' ? TB_OPENERS_EN : TB_OPENERS;
+    const pool = tobbyLang() === 'en' ? TB_OPENERS_EN : TB_OPENERS;
     const n = pool.length;
     let i = Math.floor(Math.random() * n);
     if(i === tbLastOpener) i = (i + 1) % n;
@@ -17170,15 +17192,15 @@ const TB_WX_HOT = 33, TB_WX_COLD = 18;
 function tobbyWeatherLine(part){
   const w = (typeof WEATHER === 'object' && WEATHER) ? WEATHER : null;
   if(!w || !w.kind) return null;
-  const table = LANG === 'en' ? TB_WX_LINES_EN : TB_WX_LINES;
+  const table = tobbyLang() === 'en' ? TB_WX_LINES_EN : TB_WX_LINES;
   const pool = (table[part] || {})[w.kind] || (TB_WX_LINES[part] || {})[w.kind];
   if(!pool || !pool.length) return null;
   let out = tbPickFrom(pool, 'wx:' + part + ':' + w.kind);
   if(typeof w.temp === 'number'){
     const t = Math.round(w.temp);
-    if(w.temp >= TB_WX_HOT)  out += TB_L(' Nóng ghê đó, ' + t + '°C — nhớ uống đủ nước nhé.',
+    if(w.temp >= TB_WX_HOT)  out += TB_SAY(' Nóng ghê đó, ' + t + '°C — nhớ uống đủ nước nhé.',
                                          ' Properly hot, ' + t + '°C — keep drinking water.');
-    else if(w.temp <= TB_WX_COLD) out += TB_L(' Trời lạnh, ' + t + '°C — mặc thêm áo ấm trước khi ra ngoài nhé.',
+    else if(w.temp <= TB_WX_COLD) out += TB_SAY(' Trời lạnh, ' + t + '°C — mặc thêm áo ấm trước khi ra ngoài nhé.',
                                               ' Cold out, ' + t + '°C — put something warm on before you go.');
     // Anything in between says nothing: a companion who remarks on 24°C every
     // afternoon is a companion you mute.
@@ -17237,7 +17259,7 @@ const TB_CRAVE = {
 function tbCraveText(key, which){
   const c = TB_CRAVE[key]; if(!c) return '';
   const en = c[which + 'En'];
-  return (LANG === 'en' && en) ? en : (c[which] || '');
+  return (tobbyLang() === 'en' && en) ? en : (c[which] || '');
 }
 const TB_CRAVE_KEYS = Object.keys(TB_CRAVE);
 
