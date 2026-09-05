@@ -2905,6 +2905,13 @@ body{
   animation:tbPopIn .16s cubic-bezier(.34,1.3,.64,1) both;
 }
 @keyframes tbPopIn{ from{opacity:0; transform:translateY(6px) scale(.97);} to{opacity:1; transform:none;} }
+/* The keyboard-opened one sits in the middle of the window instead of beside
+   him, and is given more room: it is opened to have a conversation in, not to
+   glance at, and the thread is the whole of what you are looking at. */
+.tb-pop-centred{
+  width:min(520px, calc(100vw - 24px));
+  max-height:min(78vh, 640px);
+}
 :root:not([data-motion="full"]) .tb-pop{ animation:none; }
 .tb-pop-head{display:flex; align-items:center; gap:8px; margin-bottom:10px;}
 .tb-pop-head .tb-title{flex:1; min-width:0; font-size:14px; font-weight:750;
@@ -15144,10 +15151,15 @@ function tobbyResumeMeal(){
  *
  *  There is deliberately no backdrop. The board behind him stays readable and
  *  stays usable, and a click anywhere outside simply closes this. */
-function tobbyPopup(title, onClose){
+function tobbyPopup(title, onClose, opt){
   document.querySelectorAll('.tb-pop').forEach(p=> p.remove());
+  // `centred` is for the popup opened from the keyboard. Anchoring to him is
+  // right when the click that opened it was on him; when it was Ctrl+P the
+  // eye is not on his corner at all, and a panel that appears at the far edge
+  // of the window is a panel you have to go and find.
+  const centred = !!(opt && opt.centred);
   const pop = document.createElement('div');
-  pop.className = 'tb-pop';
+  pop.className = 'tb-pop' + (centred ? ' tb-pop-centred' : '');
   pop.innerHTML = '<div class="tb-pop-head">' +
     '<div class="tb-title">' + title + '</div>' +
     '<button data-x aria-label="close">\u2715</button></div>' +
@@ -15165,6 +15177,14 @@ function tobbyPopup(title, onClose){
   const onKey = (e)=>{ if(e.key === 'Escape') close(); };
 
   function place(){
+    if(centred){
+      // Middle of the window, and pinned there as the panel grows: a chat
+      // that creeps upward line by line is one you keep re-finding.
+      const w = pop.offsetWidth, h = pop.offsetHeight;
+      pop.style.left = Math.round(Math.max(10, (innerWidth - w) / 2)) + 'px';
+      pop.style.top  = Math.round(Math.max(10, (innerHeight - h) / 2)) + 'px';
+      return;
+    }
     const dock = document.getElementById('tobbyDock');
     const r = dock ? dock.getBoundingClientRect()
                    : { left:innerWidth-90, right:innerWidth-14, top:innerHeight-100, bottom:innerHeight-14 };
@@ -15382,9 +15402,9 @@ function tobbyAsk(text){
    and fourteen outfits in the same window as the ask box pushed everything
    else below the fold.
    --------------------------------------------------------- */
-function tobbyPanel(){
+function tobbyPanel(opt){
   const L2 = TB_L;
-  const pop = tobbyPopup('\ud83d\udc36 Tobby', ()=> tobbyTypingStop());
+  const pop = tobbyPopup('\ud83d\udc36 Tobby', ()=> tobbyTypingStop(), opt);
   const overlay = pop.el;
   const close = pop.close;
   // Today's thread, read when the panel opens. Nothing is cleared on a timer:
@@ -15394,6 +15414,19 @@ function tobbyPanel(){
   // not on the proposal, so re-drawing for any other reason disarms it.
   let aiArmed = false;
 
+  /** Put the caret back in the ask box — but only in the panel that was opened
+   *  from the keyboard, and only after a turn.
+   *
+   *  Every draw() rebuilds the body, so focus has to be restored by hand. Not
+   *  on EVERY draw, though: arming a destructive proposal also redraws, and
+   *  pulling the caret off the button whose second press is the confirmation
+   *  would make that button unusable from the keyboard. */
+  function focusAsk(){
+    if(!opt || !opt.centred) return;
+    const box = overlay.querySelector('[data-q]');
+    if(box) box.focus();
+  }
+
   /** Add a turn and redraw. Any new turn disarms a pending delete — the armed
    *  state belongs to a button that is about to stop being the last one. */
   function pushTurn(turn){
@@ -15401,6 +15434,7 @@ function tobbyPanel(){
     tbChatSave(chatLog);
     aiArmed = false;
     draw();
+    focusAsk();
   }
   /** Swap the last turn — used to replace “Tobby đang nghĩ…” with the answer
    *  rather than leaving both of them in the thread. */
@@ -15601,6 +15635,7 @@ function tobbyPanel(){
   }
 
   draw();
+  focusAsk();
 }
 /** Feeding, the bowl's colour and the wardrobe — one screen, opened from the
  *  main panel rather than living in it. Three long sections in the same window
@@ -17014,6 +17049,67 @@ function wireTobbyInteraction(){
 }
 
 /* ---------- boot ---------- */
+/* =========================================================
+   GLOBAL SHORTCUTS
+   ---------------------------------------------------------
+   Two keys, wired once at boot rather than per render: render() rebuilds the
+   whole shell, and a listener hung inside it would be added again on every
+   navigation.
+
+   Both are ignored while the login screen is up — there is nothing to open
+   behind it — and while the caret is in a field, so Ctrl+P in the middle of
+   typing a task description does not pull a chat window over the top of it.
+
+   A note on Ctrl+T. The browser reserves it for a new tab and does not offer
+   it to the page: on a normal Chrome or Firefox window the tab opens and this
+   is never called. It works where the browser has no tab bar to defend —
+   an installed PWA, or a kiosk window — so it is wired for those, and Alt+T
+   is wired alongside it as the binding that works in an ordinary tab. Ctrl+P
+   has no such problem: print IS offered to the page, and preventDefault takes
+   it cleanly.
+   ========================================================= */
+function wireGlobalShortcuts(){
+  /** True while the keystroke belongs to something the user is typing into. */
+  const typing = (el)=>{
+    if(!el) return false;
+    if(el.isContentEditable) return true;
+    const tag = el.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+  };
+
+  document.addEventListener('keydown', (e)=>{
+    if(e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 't' || e.key === 'T')){
+      if(!isLoggedIn() || typing(e.target)) return;
+      e.preventDefault();
+      openTaskModal(null);
+      return;
+    }
+    if(!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+    const k = (e.key || '').toLowerCase();
+    if(k !== 'p' && k !== 't') return;
+    if(!isLoggedIn()) return;
+
+    // Closing is checked before the typing guard, and deliberately: the panel
+    // puts the caret straight in its own ask box, so by the time you press
+    // Ctrl+P again you are "typing" — and a toggle that only shuts when the
+    // focus happens to be elsewhere is a toggle that appears broken.
+    if(k === 'p' && document.querySelector('.tb-pop-centred')){
+      e.preventDefault();
+      document.querySelectorAll('.tb-pop').forEach(p=> p.remove());
+      try{ tobbyTypingStop(); }catch(err){}
+      return;
+    }
+    if(typing(e.target)) return;
+    e.preventDefault();
+    if(k === 'p'){
+      // Esc and click-outside come from tobbyPopup and need nothing here.
+      try{ tobbyPanel({ centred:true }); }catch(err){ console.warn('tobby panel', err); }
+    } else {
+      openTaskModal(null);
+    }
+  });
+}
+
 (function boot(){
   document.getElementById('app').innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:var(--text-2);">Đang tải Bach Office…</div>`;
   STATE = loadState();
@@ -17029,6 +17125,7 @@ function wireTobbyInteraction(){
     if(sid && empById(sid)){ SESSION_USER_ID = sid; STATE.currentUserId = sid; }
   }catch(e){}
   renderApp();
+  try{ wireGlobalShortcuts(); }catch(e){ console.warn('shortcuts', e); }
   // Ambient systems. Each guards itself, so a failure in one never stops boot.
   try{ startAlarmEngine(); renderAlarmDock(); }catch(e){ console.warn('alarms', e); }
   try{ startWeather(); }catch(e){ console.warn('weather', e); }
