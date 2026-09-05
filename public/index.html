@@ -14594,7 +14594,7 @@ function tobbyCheckProject(projectId){
   tobbyBond(TB_BOND.PROJECT, 'project');
   tobbyRemember('PROJECT', TB_L('Hoàn thành dự án ' + (p?p.name:''), 'Finished project ' + (p?p.name:'')),
                 { projectId, tasks: tasks.length });
-  try{ tobbyEmit('project_done'); }catch(e){}
+  try{ tobbyEmit('project_done', { project: p || projectId }); }catch(e){}
 }
 /** Focus, paid by the time actually spent. Capped, so a timer left running
  *  overnight is not worth more than a good afternoon. */
@@ -15244,26 +15244,36 @@ function tobbyAnswer(key){
     case 'urgent': {
       const soon = open.filter(t=> isSameDay(t.deadline));
       if(!overdue.length && !soon.length) return { text: L2('Không có gì gấp.','Nothing urgent.') };
+      // A count is not an answer. Naming the rows is what lets someone act on
+      // the reply without going to look for what it was talking about.
       return { text: L2(
-        (overdue.length ? overdue.length + ' việc quá hạn. ' : '') + (soon.length ? soon.length + ' việc đến hạn hôm nay.' : ''),
-        (overdue.length ? overdue.length + ' overdue. ' : '') + (soon.length ? soon.length + ' due today.' : '')),
+        (overdue.length ? overdue.length + ' việc quá hạn: ' + tbNameList(overdue) + '. ' : '') +
+        (soon.length ? soon.length + ' việc đến hạn hôm nay: ' + tbNameList(soon) + '.' : ''),
+        (overdue.length ? overdue.length + ' overdue: ' + tbNameList(overdue) + '. ' : '') +
+        (soon.length ? soon.length + ' due today: ' + tbNameList(soon) + '.' : '')),
         task: overdue[0] || soon[0] };
     }
     case 'overdue':
       if(!overdue.length) return { text: L2('Không nợ gì cả.','Nothing overdue.') };
-      return { text: L2('Đang nợ ' + overdue.length + ' việc. Cũ nhất: “' + overdue[0].title + '”.',
-                        overdue.length + ' overdue. Oldest: “' + overdue[0].title + '”.'), task: overdue[0] };
+      return { text: L2('Đang nợ ' + overdue.length + ' việc: ' + tbNameList(overdue) + '. Cũ nhất là ' + tbQuoteName(overdue[0].title) + '.',
+                        overdue.length + ' overdue: ' + tbNameList(overdue) + '. Oldest is ' + tbQuoteName(overdue[0].title) + '.'), task: overdue[0] };
     case 'today':
       return { text: today.length
-        ? L2('Hôm nay xong ' + today.length + ' việc. Giỏi đấy.', today.length + ' done today. Nice.')
-        : L2('Hôm nay chưa xong việc nào.','Nothing finished today yet.') };
+        ? L2('Hôm nay xong ' + today.length + ' việc: ' + tbNameList(today) + '. Giỏi đấy.',
+             today.length + ' done today: ' + tbNameList(today) + '. Nice.')
+        : L2('Hôm nay chưa xong việc nào.','Nothing finished today yet.'),
+        task: today[0] || null };
     case 'week': {
       const wk = activeTasks().filter(t=>{
         if(t.status!=='Hoàn thành' || !t.completedAt) return false;
         return (Date.now() - new Date(t.completedAt)) < 7*86400000;
       });
-      return { text: L2('7 ngày qua xong ' + wk.length + ' việc, còn ' + open.length + ' việc đang mở.',
-                        wk.length + ' finished this week, ' + open.length + ' still open.') };
+      const nxt = tobbyPickNext();
+      return { text: L2('7 ngày qua xong ' + wk.length + ' việc, còn ' + open.length + ' việc đang mở' +
+                          (nxt ? ', gần hạn nhất là ' + tbQuoteName(nxt.title) : '') + '.',
+                        wk.length + ' finished this week, ' + open.length + ' still open' +
+                          (nxt ? ', the nearest is ' + tbQuoteName(nxt.title) : '') + '.'),
+               task: nxt || null };
     }
     case 'heavy': {
       const h = open.slice().sort((a,b)=> (b.estimateHours||0)-(a.estimateHours||0))[0];
@@ -15861,45 +15871,49 @@ const TB_EMO = {
 };
 
 const TB_DIALOGUE = {
-  /* ---- 1. Khẩn cấp ---- */
+  /* ---- 1. Khẩn cấp ----
+     Mọi câu nói về một nhiệm vụ đều mang {task}. Xem tbFillSubject(): chỗ đó
+     điền tên trong ngoặc kép khi người gọi đưa nhiệm vụ vào, và điền "việc
+     này" khi không — nên các câu dưới đây phải đọc xuôi ở cả hai dạng, và
+     {task} không bao giờ đứng đầu câu. */
   task_overdue:      { emo:'urgent',  clip:'Tobby_UrgentNotification', hold:4600,
-    lines:['Ơ… việc này quá hạn rồi đó.'] },
+    lines:['Ơ… {task} quá hạn rồi đó.'] },
   deadline_30m:      { emo:'urgent',  clip:'Tobby_UrgentNotification', hold:4600,
-    lines:['Chỉ còn 30 phút nữa thôi! Mình xử lý ngay nhé?'] },
+    lines:['Chỉ còn 30 phút cho {task} thôi! Mình xử lý ngay nhé?'] },
   deadline_2h:       { emo:'worried', clip:'Tobby_Worried', hold:4400,
-    lines:['Việc này sắp đến hạn rồi. Đừng để nó chạy mất nhé!'] },
+    lines:['Sắp đến hạn {task} rồi. Đừng để nó chạy mất nhé!'] },
   deadline_today:    { emo:'neutral', clip:'Tobby_LookAtNotification', hold:4200,
-    lines:['Hôm nay có một việc cần hoàn thành đấy.'] },
+    lines:['Hôm nay cần hoàn thành {task} đấy.'] },
   multiple_urgent:   { emo:'worried', clip:'Tobby_Worried', hold:6000,
-    lines:['Có hơi nhiều việc đang cùng lúc gấp đấy… Mình nên ưu tiên một việc trước.'] },
+    lines:['Có hơi nhiều việc đang cùng lúc gấp đấy… Mình nên làm {task} trước.'] },
   project_at_risk:   { emo:'worried', clip:'Tobby_Worried', hold:5600,
-    lines:['Mình nghĩ dự án này đang có nguy cơ trễ deadline rồi.'] },
+    lines:['Mình nghĩ dự án {project} đang có nguy cơ trễ deadline rồi.'] },
   focus_abandoned:   { emo:'sad',     clip:'Tobby_Sad', hold:4200,
     lines:['Ơ, mình đang tập trung mà… Sao lại dừng rồi?'] },
 
   /* ---- 2. Nhắc việc thông minh ---- */
   task_stale:        { emo:'curious', clip:'Tobby_Curious', hold:5000,
-    lines:['Việc này nằm đây khá lâu rồi… Mình xử lý nó hôm nay nhé?'] },
+    lines:['Hình như {task} nằm đây khá lâu rồi… Mình xử lý nó hôm nay nhé?'] },
   task_due_soon:     { emo:'neutral', clip:'Tobby_LookAtNotification', hold:4200,
-    lines:['Mình để ý thấy việc này sắp đến hạn rồi.'] },
+    lines:['Mình để ý thấy {task} sắp đến hạn rồi.'] },
   task_important:    { emo:'neutral', clip:'Tobby_Curious', hold:4400,
-    lines:['Đây là một trong những việc quan trọng hôm nay đấy.'] },
+    lines:['Trong những việc quan trọng hôm nay có {task} đấy.'] },
   task_new:          { emo:'curious', clip:'Tobby_LookAtNotification', hold:3800,
-    lines:['Có một việc mới dành cho bạn.'] },
+    lines:['Bạn vừa được giao {task} đấy.'] },
   priority_changed:  { emo:'curious', clip:'Tobby_Surprised', hold:4000,
-    lines:['Việc này vừa được nâng mức ưu tiên.'] },
+    lines:['Mức ưu tiên của {task} vừa được nâng lên.'] },
   project_changed:   { emo:'curious', clip:'Tobby_LookAtNotification', hold:4000,
-    lines:['Có một thay đổi mới trong dự án này.'] },
+    lines:['Có một thay đổi mới trong dự án {project}.'] },
 
   /* ---- 3. Khi hoàn thành ---- */
   task_done:         { emo:'happy',   clip:'Tobby_TaskCompleted', hold:3800, xp:10,
-    lines:['Xong rồi! Một việc nữa được xử lý.'] },
+    lines:['Xong {task} rồi! Một việc nữa được xử lý.'] },
   task_done_important:{ emo:'proud',  clip:'Tobby_TaskCompleted', hold:4200, xp:20,
-    lines:['Tuyệt! Việc quan trọng này đã xong.'] },
+    lines:['Tuyệt! Bạn vừa xong {task} — một việc quan trọng đấy.'] },
   project_last_task_done:{ emo:'excited', clip:'Tobby_Excited', hold:4600,
-    lines:['Khoan… vậy là xong hết rồi sao? 🎉'] },
+    lines:['Khoan… vậy là dự án {project} xong hết rồi sao? 🎉'] },
   project_done:      { emo:'excited', clip:'Tobby_Celebrate', hold:6000, xp:100,
-    lines:['CHÚC MỪNG! Dự án này chính thức hoàn thành!'] },
+    lines:['CHÚC MỪNG! Dự án {project} chính thức hoàn thành!'] },
   focus_done:        { emo:'proud',   clip:'Tobby_Proud', hold:4400,
     lines:['Một phiên tập trung tuyệt vời! Bạn làm tốt lắm.'] },
   multiple_done_today:{ emo:'excited', clip:'Tobby_Happy', hold:4400,
@@ -16049,12 +16063,73 @@ function tbPickFrom(pool, memoKey){
   return pool[i];
 }
 
+/** A thing's name as it should appear inside a sentence: in quotes, and short
+ *  enough that a bubble 210px wide still holds the sentence around it. Trimmed
+ *  on a word boundary where there is one — a title cut mid-word reads as a bug
+ *  rather than as an abbreviation. */
+const TB_NAME_MAX = 38;
+function tbQuoteName(name){
+  let s = String(name || '').replace(/\s+/g, ' ').trim();
+  if(!s) return '';
+  if(s.length > TB_NAME_MAX){
+    const cut = s.slice(0, TB_NAME_MAX);
+    const sp = cut.lastIndexOf(' ');
+    s = (sp > TB_NAME_MAX * 0.6 ? cut.slice(0, sp) : cut).trimEnd() + '…';
+  }
+  return '“' + s + '”';
+}
+/** A few names in a row, for an answer that is about several tasks at once.
+ *  Capped rather than exhaustive: "và 9 việc khác" is readable, and a list of
+ *  twelve titles in a chat bubble is not. */
+function tbNameList(rows, max){
+  const list = (rows || []).filter(Boolean);
+  const n = max || 3;
+  const head = list.slice(0, n).map(r=> tbQuoteName(r.title || r.name || r.text)).filter(Boolean);
+  if(!head.length) return '';
+  const rest = list.length - head.length;
+  if(rest > 0) head.push(TB_L('và ' + rest + ' việc khác', 'and ' + rest + ' more'));
+  return head.join(', ');
+}
+/** Fill {task} and {project} for a line that names one.
+ *
+ *  Anything Tobby says about a task has to say WHICH task — a board with
+ *  thirty rows on it and a bubble reading "việc này sắp đến hạn" names
+ *  nothing, and the person reading it still has to go and find out which one
+ *  he means. So the placeholder is filled from whatever the caller passed:
+ *  a task object, a subtask, a bare string, or an id looked up in STATE.
+ *
+ *  When the caller passed nothing at all the placeholder still has to resolve,
+ *  or the raw "{task}" reaches the screen. It falls back to the wording the
+ *  line used to have, which is why every line is written so the placeholder
+ *  sits mid-sentence and reads either way. */
+function tbSubjectName(v, kind){
+  if(!v) return '';
+  if(typeof v === 'string'){
+    // An id if it matches one, otherwise the name itself.
+    const row = kind === 'project'
+      ? (typeof projectById === 'function' ? projectById(v) : null)
+      : (STATE.tasks || []).find(t=> t.id === v);
+    return tbQuoteName(row ? (row.name || row.title) : v);
+  }
+  return tbQuoteName(v.title || v.name || v.text || '');
+}
+function tbFillSubject(text, o){
+  return text.replace(/\{(task|project)\}/g, (whole, k)=>{
+    const named = tbSubjectName(k === 'project' ? (o.project || o.projectId) : (o.task || o.taskId), k);
+    if(named) return named;
+    return k === 'project' ? TB_L('này','this one') : TB_L('việc này','this one');
+  });
+}
+
 /**
  * EVENT -> EMOTION -> ANIMATION -> SPEECH.
  *
  * `opt.text` replaces the line outright — the weather, the food riddles and the
  * note answer compose their own sentence and then borrow this whole chain, so
  * they get the same face and the same bubble as everything else.
+ *
+ * `opt.task` / `opt.project` are what put a name in the sentence. Passing the
+ * row is enough; the line decides where the name goes.
  */
 function tobbyEmit(id, opt){
   const def = TB_DIALOGUE[id];
@@ -16063,6 +16138,9 @@ function tobbyEmit(id, opt){
   let text = o.text || tbPickFrom(def.lines, id);
   if(o.vars) text = text.replace(/\{(\w+)\}/g, (whole, k)=>
     Object.prototype.hasOwnProperty.call(o.vars, k) ? String(o.vars[k]) : whole);
+  // After vars, so an explicit vars.task still wins; before the opener, so the
+  // name cannot land inside the sentence glued on in front of it.
+  text = tbFillSubject(text, o);
   if(o.opener){
     const n = TB_OPENERS.length;
     let i = Math.floor(Math.random() * n);
@@ -16395,7 +16473,10 @@ function tobbyTick(){
   for(const task of board.open){
     if(!task.deadline) continue;
     const fire = tobbyAdvanceLadder(task, now);
-    if(fire){ tobbyEmit(fire); return; }
+    // The task goes with the event. It is the whole point of a deadline
+    // warning: the ladder already knows which row rang, and saying so is the
+    // difference between a warning and an errand.
+    if(fire){ tobbyEmit(fire, { task }); return; }
   }
 
   // Readings of the whole board, each at most once a day.
@@ -16423,7 +16504,11 @@ function tobbyTick(){
     // Not flagged: this describes the board as it is now rather than a moment
     // that has passed, so it is allowed to come back. The ladder above stops
     // it repeating within a tick.
-    tobbyEmit('multiple_urgent', { opener:true });
+    //
+    // "Nhiều việc đang gấp" on its own leaves the person to work out which one
+    // to start, which is the part he is meant to be useful at — so the line
+    // names the one he would pick.
+    tobbyEmit('multiple_urgent', { opener:true, task: tobbyPickNext() });
   }
 }
 /* =========================================================
