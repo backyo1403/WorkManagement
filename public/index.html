@@ -2948,33 +2948,48 @@ body{
   text-shadow:0 1px 2px rgba(10,14,25,.28);
   opacity:0; will-change:transform, opacity;
 }
-.tb-vfx.k-rise  {animation:tbVfxOut  1.15s cubic-bezier(.2,.7,.3,1) forwards;}
-.tb-vfx.k-burst {animation:tbVfxOut  .95s  cubic-bezier(.15,.85,.3,1) forwards;}
-.tb-vfx.k-fling {animation:tbVfxOut  1s    cubic-bezier(.25,.6,.4,1) forwards;}
-.tb-vfx.k-fall  {animation:tbVfxFall 1.25s cubic-bezier(.4,0,.7,1) forwards;}
-.tb-vfx.k-settle{animation:tbVfxOut  1.5s  cubic-bezier(.2,.5,.3,1) forwards;}
+/* Each of these carries a second and a half more than it used to. The travel
+   and the easing are unchanged, so the glyphs cover the same ground — they
+   just take their time over it, and are legible for long enough to be read as
+   a comment rather than caught out of the corner of an eye.
+   TB_VFX_LIFE_MS is what takes them off the screen afterwards; it has to stay
+   longer than the slowest line here. */
+.tb-vfx.k-rise  {animation:tbVfxOut  2.65s cubic-bezier(.2,.7,.3,1) forwards;}
+.tb-vfx.k-burst {animation:tbVfxOut  2.45s cubic-bezier(.15,.85,.3,1) forwards;}
+.tb-vfx.k-fling {animation:tbVfxOut  2.5s  cubic-bezier(.25,.6,.4,1) forwards;}
+.tb-vfx.k-fall  {animation:tbVfxFall 2.75s cubic-bezier(.4,0,.7,1) forwards;}
+.tb-vfx.k-settle{animation:tbVfxOut  3s    cubic-bezier(.2,.5,.3,1) forwards;}
 /* The charge runs the other way: it starts spread out and is pulled in, which
    is what makes a LevelUp read as gathering before it releases. */
-.tb-vfx.k-draw  {animation:tbVfxIn   .85s  ease-in forwards;}
+.tb-vfx.k-draw  {animation:tbVfxIn   2.35s ease-in forwards;}
+/* The extra stop in the middle of each of these is opacity only, so the travel
+   still interpolates straight from the early keyframe to the last one and the
+   path is the one that was tuned. What it buys is a hold at full strength
+   across the middle of the run: without it, stretching the duration just
+   stretched the fade, and the glyph spent two of its three seconds too faint
+   to read. */
 @keyframes tbVfxOut{
   0%{opacity:0; transform:translate(0,0) scale(.55);}
-  18%{opacity:1; transform:translate(calc(var(--dx) * .22), calc(var(--dy) * .22)) scale(1.05);}
+  9%{opacity:1; transform:translate(calc(var(--dx) * .22), calc(var(--dy) * .22)) scale(1.05);}
+  58%{opacity:1;}
   100%{opacity:0; transform:translate(var(--dx), var(--dy)) scale(.85);}
 }
 @keyframes tbVfxFall{
   0%{opacity:0; transform:translate(0,0) scale(.6);}
-  22%{opacity:1; transform:translate(calc(var(--dx) * .2), calc(var(--dy) * .12)) scale(1);}
+  11%{opacity:1; transform:translate(calc(var(--dx) * .2), calc(var(--dy) * .12)) scale(1);}
+  60%{opacity:1;}
   100%{opacity:0; transform:translate(var(--dx), var(--dy)) scale(.9);}
 }
 @keyframes tbVfxIn{
   0%{opacity:0; transform:translate(var(--dx), var(--dy)) scale(1);}
-  25%{opacity:1;}
+  12%{opacity:1;}
+  62%{opacity:1;}
   100%{opacity:0; transform:translate(0,0) scale(.35);}
 }
 /* Reduced motion keeps the vocabulary and drops the travel: one glyph, held
    still, faded out. Hiding it outright would mean a whole channel of feedback
    existed only for people who can watch it move. */
-.tb-vfx.still{animation:tbVfxHold .9s ease-out forwards; transform:translate(0,-14px);}
+.tb-vfx.still{animation:tbVfxHold 2.4s ease-out forwards; transform:translate(0,-14px);}
 @keyframes tbVfxHold{0%{opacity:0;} 20%{opacity:1;} 70%{opacity:1;} 100%{opacity:0;}}
 
 /* A state rather than a moment: sleeping, thinking, working, typing. Stays up
@@ -16414,6 +16429,16 @@ function tbVfxOrigin(anchor){
   return { x: h.centreX, y: h.top + 4, r: Math.max(14, bodyH*0.34) };
 }
 
+/** Every glyph is drawn 15% larger than the anchor alone would ask for. The
+ *  anchor radius is still what scales them with him — this is a thumb on top
+ *  of it, applied in one place so the head one-shots and the looping states
+ *  cannot drift apart. */
+const TB_VFX_SIZE = 1.15;
+/** How long a glyph stays in the DOM. Must outlast the slowest animation in
+ *  the .tb-vfx block — k-settle at 3s — or an effect is cut off mid-flight;
+ *  the stagger below adds each glyph's own delay on top. */
+const TB_VFX_LIFE_MS = 3150, TB_VFX_STILL_LIFE_MS = 2500;
+
 let tbVfxHeadEls = [];        // the one-shot at his head, so a new one replaces it
 /**
  * Draw an effect by name.
@@ -16447,7 +16472,9 @@ function tobbyVfx(name, opt){
     el.style.color = def.c;
     // Sized off him too, not off a constant: at Tiny Puppy he is drawn at half
     // the height, and a 12px star beside a 30px dog is a sticker on a photo.
-    el.style.fontSize = Math.max(9, at.r * 0.55 * scale).toFixed(1) + 'px';
+    // The floor rises with the rest of it, or the smallest stage — where the
+    // floor is what actually applies — would be the one place the 15% did not.
+    el.style.fontSize = (Math.max(9, at.r * 0.55 * scale) * TB_VFX_SIZE).toFixed(1) + 'px';
     const a = tbVfxAngle(def.k);
     const r = spread * (0.55 + Math.random() * 0.7);
     el.style.setProperty('--dx', (Math.cos(a) * r).toFixed(1) + 'px');
@@ -16457,7 +16484,7 @@ function tobbyVfx(name, opt){
     if(!still) el.style.animationDelay = (i * 40) + 'ms';
     document.body.appendChild(el);
     made.push(el);
-    setTimeout(()=> el.remove(), (still ? 900 : 1300) + i * 40);
+    setTimeout(()=> el.remove(), (still ? TB_VFX_STILL_LIFE_MS : TB_VFX_LIFE_MS) + i * 40);
   }
   if(anchor === 'head') tbVfxHeadEls = made;
 }
@@ -16510,7 +16537,7 @@ function tobbyVfxLoopPlace(){
   if(!at){ tobbyVfxLoopOff(); return; }
   tbVfxLoopEl.style.left = (at.x + at.r * 0.75) + 'px';
   tbVfxLoopEl.style.top  = (at.y - at.r * 0.35) + 'px';
-  tbVfxLoopEl.style.fontSize = Math.max(10, at.r * 0.62).toFixed(1) + 'px';
+  tbVfxLoopEl.style.fontSize = (Math.max(10, at.r * 0.62) * TB_VFX_SIZE).toFixed(1) + 'px';
 }
 /** Off the screen now, not when an animation feels like ending. */
 function tobbyVfxLoopOff(){
