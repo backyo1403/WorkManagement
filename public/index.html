@@ -3187,17 +3187,55 @@ body{
   transition:border-color .14s ease, background .14s ease;
 }
 .tb-ask input:focus{border-color:var(--brand); background:var(--surface);}
-.tb-ask button{
-  border:none; background:var(--brand); color:var(--on-brand, #fff);
-  border-radius:10px; padding:0 14px; font-size:12px; font-weight:700; cursor:pointer;
+/* The microphone, now the only control beside the box. Quiet while it is off —
+   the subject of this row is the text box, and Enter is what sends. */
+.tb-mic{
+  flex:0 0 auto; width:38px; padding:0;
+  border:1px solid var(--border); background:var(--surface-2);
+  color:var(--text-2); border-radius:10px; font-size:14px; line-height:1;
+  cursor:pointer; transition:border-color .14s ease, background .14s ease;
 }
-.tb-chips{display:flex; flex-wrap:wrap; gap:5px;}
-.tb-chip{
-  border:1px solid var(--border); background:var(--surface); color:var(--text-2);
-  border-radius:999px; padding:5px 11px; font-size:11.5px; font-weight:600; cursor:pointer;
-  transition:border-color .12s ease, color .12s ease;
+.tb-mic:hover{border-color:var(--brand);}
+/* Listening. The ring is the only thing on this screen that repeats forever,
+   which is the point: it has to be obvious that the machine is still hearing
+   you, and obvious the moment it stops. */
+.tb-mic.on{
+  background:var(--danger-soft); border-color:var(--danger);
+  color:var(--danger); animation:tbMicPulse 1.4s ease-in-out infinite;
 }
-.tb-chip:hover{border-color:var(--brand); color:var(--text);}
+@keyframes tbMicPulse{
+  0%,100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--danger) 45%, transparent);}
+  70%    {box-shadow:0 0 0 6px color-mix(in srgb, var(--danger) 0%, transparent);}
+}
+:root:not([data-motion="full"]) .tb-mic.on{animation:none;}
+.tb-mic-status{
+  margin:-4px 0 8px; padding:0 2px; font-size:11.5px; line-height:1.45;
+  color:var(--text-3); word-break:break-word;
+}
+/* The ask box and the list that drops out of it. The wrapper owns the spacing
+   so the list can be taken out of the flow — a suggestion list that pushes the
+   quick actions down the panel every time you type a letter is worse than no
+   suggestions. */
+.tb-ask-wrap{position:relative; margin-bottom:8px;}
+.tb-ask-wrap .tb-ask{margin-bottom:0;}
+.tb-suggest{
+  position:absolute; left:0; right:0; top:calc(100% + 5px); z-index:5;
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  box-shadow:var(--shadow-lg); padding:4px; max-height:216px; overflow-y:auto;
+}
+/* Flipped, when the box is too near the bottom of the panel for the list to
+   open downwards. Set from script, which is the only place the room available
+   inside a scrolling popup can be measured. */
+.tb-suggest.up{top:auto; bottom:calc(100% + 5px);}
+.tb-sug{
+  display:block; width:100%; text-align:left; border:none; background:none;
+  color:var(--text-2); font-size:12.5px; font-weight:600;
+  padding:8px 10px; border-radius:8px; cursor:pointer;
+}
+/* Hover and keyboard selection are the same state on purpose: with both a
+   mouse and arrow keys driving this, two different highlights would be two
+   answers to "which one does Enter take". */
+.tb-sug:hover, .tb-sug.on{background:var(--surface-2); color:var(--text);}
 .tb-answer{
   margin-top:12px; padding:11px 13px; border-radius:0 12px 12px 0;
   background:color-mix(in srgb, var(--brand) 8%, var(--surface-2));
@@ -12053,6 +12091,8 @@ function settingsAmbiencePanel(){
   const cOn = !STATE.settings || STATE.settings.combo !== false;
   const tOn = tobbyEnabled();
   const tSc = tobbyScale();
+  const vPrefs = tobbyVoicePrefs();
+  const vOn = vPrefs.enabled, vLang = vPrefs.lang;
   return `<div class="card" style="max-width:520px;margin-bottom:16px;">
     <h3>🌦️ Hiệu ứng thời tiết</h3>
     <div style="font-size:12.5px;color:var(--text-2);margin-bottom:12px;line-height:1.55;">
@@ -12118,7 +12158,27 @@ function settingsAmbiencePanel(){
     <div class="tb-range">
       <input type="range" id="tobbyScale" min="0.5" max="1.5" step="0.05" value="${tSc}">
       <b id="tobbyScaleVal">${tSc.toFixed(2)}×</b>
-    </div>`:''}
+    </div>
+    <div style="font-size:12px;color:var(--text-3);margin:16px 0 8px;">🔊 Đọc to câu trả lời — Tobby vừa hiện chữ vừa đọc thành tiếng</div>
+    <div class="pill-toggle-row" style="margin-bottom:${vOn?'14px':'0'};">
+      <button class="pill-toggle ${vOn?'active':''}" data-voice-tts-set="1">Bật</button>
+      <button class="pill-toggle ${!vOn?'active':''}" data-voice-tts-set="0">Tắt</button>
+    </div>
+    ${vOn?`<div style="font-size:12px;color:var(--text-3);margin-bottom:8px;">Ngôn ngữ Tobby nghe và nói — không liên quan tới ngôn ngữ giao diện</div>
+    <div class="pill-toggle-row" style="margin-bottom:14px;">
+      <button class="pill-toggle ${vLang==='vi'?'active':''}" data-voice-lang-set="vi">Tiếng Việt</button>
+      <button class="pill-toggle ${vLang==='en'?'active':''}" data-voice-lang-set="en">English</button>
+    </div>
+    <div style="font-size:12px;color:var(--text-3);margin-bottom:8px;">Giọng đọc</div>
+    <select id="tobbyVoiceSelect" class="filter-select" style="width:100%;">
+      <option value="">Tự động (khuyên dùng)</option>
+    </select>
+    <div style="font-size:11.5px;color:var(--text-3);margin-top:8px;line-height:1.55;">
+      Danh sách giọng là giọng máy bạn đang có — trình duyệt không cho biết giọng thuộc
+      vùng miền nào hay nam hay nữ, nên mục <b>Tự động</b> chỉ <i>đoán</i> lấy giọng nam
+      tiếng Việt nghe hợp nhất, không đảm bảo được. Máy không cài giọng tiếng Việt nào thì
+      Tobby vẫn đọc, bằng giọng mặc định của trình duyệt.
+    </div>`:''}`:''}
   </div>
   <div class="card" style="max-width:520px;">
     <h3>🔥 Chuỗi hoàn thành (Combo)</h3>
@@ -12376,6 +12436,7 @@ function wireSettings(){
     };
     tsc.onchange = ()=>{ STATE.settings.tobbyScale = Number(tsc.value); persist(); };
   }
+  wireTobbyVoiceSettings();
   const cd = document.getElementById('comboDemo');
   if(cd) cd.onclick = ()=> showComboBanner(3);
   document.querySelectorAll('[data-set-lang]').forEach(el=> el.onclick = ()=> setLang(el.dataset.setLang));
@@ -15422,6 +15483,305 @@ function tobbyAsk(text){
   return tobbyAnswer(hit);
 }
 
+/* =========================================================
+   VOICE — asking him out loud, and hearing the answer back
+   ---------------------------------------------------------
+   Deliberately not a second way of answering questions. The microphone types
+   into the box that is already there and presses the button that is already
+   there: everything after that is the same tobbyAsk / tobbyAskAI / onsubmit
+   path a typed question takes, so the two can never answer differently.
+
+   Nothing listens in the background. The microphone is off until the button in
+   the panel is pressed, and it stops when it is pressed again or when the panel
+   closes — an app that can hear you while you are not talking to it is a
+   different product, and not this one.
+
+   Both halves lean entirely on what the browser already ships. SpeechRecognition
+   is Chrome and Edge only today; where it is missing the button is not drawn at
+   all rather than drawn and broken.
+   ========================================================= */
+
+/** The three voice controls in Settings. Written through STATE.settings and
+ *  persist(), the same as every other switch in this card. */
+function wireTobbyVoiceSettings(){
+  const save = (patch)=>{
+    STATE.settings.tobbyVoice = Object.assign({}, STATE.settings.tobbyVoice, patch);
+    persist();
+  };
+  document.querySelectorAll('[data-voice-tts-set]').forEach(el=> el.onclick = ()=>{
+    const on = el.dataset.voiceTtsSet === '1';
+    save({ enabled: on });
+    // Switching it off mid-sentence has to stop the sentence. Waiting for the
+    // current answer to finish is the app arguing with the switch.
+    if(!on) tobbyVoiceShutUp();
+    renderView();
+  });
+  document.querySelectorAll('[data-voice-lang-set]').forEach(el=> el.onclick = ()=>{
+    // The chosen voice goes with the language it was chosen for: a Vietnamese
+    // voice reading English is not a setting anyone asked for.
+    save({ lang: el.dataset.voiceLangSet === 'en' ? 'en' : 'vi', voiceURI: '' });
+    tobbyVoiceShutUp();
+    renderView();
+  });
+
+  const sel = document.getElementById('tobbyVoiceSelect');
+  if(!sel) return;
+  const fill = ()=>{
+    const want = tobbyVoicePrefs().lang === 'en' ? 'en' : 'vi';
+    const cur = tobbyVoicePrefs().voiceURI;
+    const mine = tobbyVoiceList().filter(v=> (v.lang || '').toLowerCase().startsWith(want));
+    const auto = tobbyPickDefaultVoice();
+    sel.innerHTML =
+      '<option value="">' + esc('Tự động' + (auto ? ' — ' + auto.name : ' (khuyên dùng)')) + '</option>' +
+      mine.map(v=> '<option value="' + esc(v.voiceURI) + '"' +
+        (v.voiceURI === cur ? ' selected' : '') + '>' + esc(v.name) + '</option>').join('');
+    if(!mine.length){
+      sel.innerHTML += '<option value="" disabled>' +
+        esc('(Máy này chưa có giọng ' + (want === 'en' ? 'tiếng Anh' : 'tiếng Việt') + ' nào)') + '</option>';
+    }
+  };
+  fill();
+  // getVoices() is empty on the first call in most browsers — the list arrives
+  // asynchronously, and the event is the only signal that it has.
+  try{ speechSynthesis.onvoiceschanged = ()=>{ if(document.getElementById('tobbyVoiceSelect') === sel) fill(); }; }
+  catch(e){}
+  sel.onchange = ()=>{
+    save({ voiceURI: sel.value });
+    // Say something in it, so choosing from a list of names is a decision you
+    // can actually make.
+    if(tobbyVoicePrefs().enabled){
+      tobbyVoiceSpeak(tobbyVoicePrefs().lang === 'en'
+        ? 'Hello, this is how I sound.' : 'Xin chào, giọng của mình nghe như thế này.');
+    }
+  };
+}
+
+/** The voice settings, read the way every other Tobby preference is read — out
+ *  of STATE.settings, so they save and sync with the rest of them rather than
+ *  living in a corner of localStorage of their own. */
+function tobbyVoicePrefs(){
+  const v = (STATE.settings && STATE.settings.tobbyVoice) || {};
+  return {
+    enabled: v.enabled === true,            // off until asked for
+    lang: v.lang === 'en' ? 'en' : 'vi',
+    voiceURI: v.voiceURI || '',             // empty = pick one automatically
+  };
+}
+/** His speaking language, which is NOT the interface language. Someone can run
+ *  the app in English and still want to talk to the dog in Vietnamese. */
+function tobbyVoiceTag(){ return tobbyVoicePrefs().lang === 'en' ? 'en-US' : 'vi-VN'; }
+function tobbyVoiceList(){
+  try{ return window.speechSynthesis ? (speechSynthesis.getVoices() || []) : []; }
+  catch(e){ return []; }
+}
+/** The voice used when the setting is left on "automatic".
+ *
+ *  Name-matching is the only lever there is: the Web Speech API reports a name
+ *  and a language tag and nothing else — no gender, no region, no accent. So a
+ *  male northern-Vietnamese voice cannot be *selected*, only guessed at from
+ *  whatever the machine happens to have installed, and the guess is allowed to
+ *  fail all the way back to the browser default rather than refusing to speak. */
+function tobbyPickDefaultVoice(){
+  const want = tobbyVoicePrefs().lang === 'en' ? 'en' : 'vi';
+  const all = tobbyVoiceList();
+  const mine = all.filter(v=> (v.lang || '').toLowerCase().startsWith(want));
+  if(!mine.length) return null;             // no voice for this language: browser default
+  // Matched against the accent-stripped name, so every alternative here has to
+  // be written without accents too — "bắc" would simply never fire.
+  const hint = /(\bnam\b|male|minh|hoai|\bbac\b|north)/;
+  return mine.find(v=> hint.test(tbStripVi(v.name || ''))) || mine[0];
+}
+
+/** Read one of his answers out loud. Silent unless the setting is on. */
+function tobbyVoiceSpeak(text){
+  const p = tobbyVoicePrefs();
+  if(!p.enabled || !text || !window.speechSynthesis) return;
+  const say = tobbyVoiceCleanText(text);
+  if(!say) return;
+  try{
+    // Cancel first: two answers overlapping is unintelligible, and a long one
+    // still running when the next arrives is the common case.
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(say);
+    u.lang = tobbyVoiceTag();
+    const chosen = p.voiceURI
+      ? tobbyVoiceList().find(v=> v.voiceURI === p.voiceURI)
+      : tobbyPickDefaultVoice();
+    if(chosen) u.voice = chosen;
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+/** What is on screen is not what should be read. Emoji read out as their own
+ *  names, a URL is read character by character, and the markdown is punctuation
+ *  nobody said. */
+function tobbyVoiceCleanText(text){
+  return String(text || '')
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/[*_`~#]+/g, ' ')
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function tobbyVoiceShutUp(){ try{ speechSynthesis.cancel(); }catch(e){} }
+
+/** "Hey Tobby", as a speech recogniser is likely to have heard it.
+ *  Matched against accent-stripped text, so "Hê Tô Bi" and "hay toby" both land
+ *  here — Vietnamese dictation does not spell an English name the same way
+ *  twice, and the wake phrase is worth being generous about. */
+const TB_WAKE = /(?:hey|hay|hei|hi|he|ei)\s*,?\s*(?:tobby|tobbi|toby|tobi|topi|top\s?by|to\s?by|to\s?bi|tob)\b/;
+/** How long a pause means "I have finished the question". */
+const TB_VOICE_GAP_MS = 1200;
+/** How much of the running transcript is kept. Long enough for any question
+ *  somebody would ask out loud, short enough that an hour of conversation in
+ *  the same room does not accumulate in memory. */
+const TB_VOICE_TAIL = 400;
+
+/** The microphone session.
+ *
+ *  State lives here rather than in the DOM because draw() rebuilds the whole
+ *  panel body on every turn — the button that started the session no longer
+ *  exists by the time the answer arrives, so `on` has to outlive it and the
+ *  button has to be re-bound and re-painted from it after each redraw. */
+const TobbyVoice = {
+  rec:null, overlay:null, on:false, byUser:false,
+  finalText:'', heardWake:false, timer:0,
+
+  supported(){ return !!(window.SpeechRecognition || window.webkitSpeechRecognition); },
+
+  /** Called on every panel draw: the elements are new each time, the session is
+   *  not. */
+  attach(overlay){
+    this.overlay = overlay;
+    const btn = overlay.querySelector('[data-voice-mic]');
+    if(!btn) return;
+    if(!this.supported()){ btn.remove(); return; }
+    btn.onclick = (e)=>{ e.preventDefault(); e.stopPropagation(); this.toggle(); };
+    this.paint();
+  },
+
+  paint(msg){
+    const o = this.overlay; if(!o) return;
+    const btn = o.querySelector('[data-voice-mic]');
+    const st  = o.querySelector('[data-voice-status]');
+    if(btn){
+      btn.classList.toggle('on', this.on);
+      btn.textContent = this.on ? '⏺' : '🎙️';
+      btn.title = this.on ? TB_L('Đang nghe — bấm để tắt','Listening — click to stop')
+                          : TB_L('Hỏi bằng giọng nói','Ask by voice');
+    }
+    if(st){
+      st.hidden = !this.on;
+      st.textContent = this.on ? (msg || TB_L('Đang nghe… nói “Hey Tobby” rồi hỏi.',
+                                              'Listening… say “Hey Tobby”, then ask.')) : '';
+    }
+  },
+
+  toggle(){ this.on ? this.stop(true) : this.start(); },
+
+  start(){
+    if(this.on || !this.supported()) return;
+    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new Rec();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = tobbyVoiceTag();
+    rec.onresult = (e)=> this.onResult(e);
+    rec.onerror  = (e)=> this.onError(e);
+    // Recognisers hang up on their own every so often, continuous or not. If the
+    // session was not ended on purpose, start it again so one silence does not
+    // quietly end a session the user still believes is running.
+    rec.onend = ()=>{
+      if(this.byUser || !this.on) return;
+      try{ rec.start(); }catch(err){}
+    };
+    this.rec = rec; this.on = true; this.byUser = false;
+    this.reset();
+    try{ rec.start(); }
+    catch(err){ this.on = false; this.rec = null; }
+    this.paint();
+  },
+
+  stop(byUser){
+    this.byUser = !!byUser;
+    this.on = false;
+    clearTimeout(this.timer);
+    if(this.rec){ try{ this.rec.stop(); }catch(e){} try{ this.rec.abort(); }catch(e){} }
+    this.rec = null;
+    this.reset();
+    this.paint();
+  },
+
+  reset(){ this.finalText = ''; this.heardWake = false; clearTimeout(this.timer); },
+
+  onError(e){
+    const err = e && e.error;
+    // Refused permission is the end of the session — retrying only makes the
+    // browser ask again, which is how a page becomes the one people block.
+    if(err === 'not-allowed' || err === 'service-not-allowed'){
+      this.stop(true);
+      this.on = false;
+      toast(TB_L('Cần cho phép micro để hỏi bằng giọng nói.',
+                 'Microphone permission is needed to ask by voice.'));
+      return;
+    }
+    // 'no-speech' and 'aborted' are ordinary: onend restarts the session.
+  },
+
+  onResult(e){
+    let interim = '';
+    for(let i = e.resultIndex; i < e.results.length; i++){
+      const r = e.results[i];
+      if(r.isFinal) this.finalText += r[0].transcript + ' ';
+      else interim += r[0].transcript;
+    }
+    // The session runs until it is switched off, so the transcript is bounded
+    // rather than allowed to grow for as long as someone is in the room. The
+    // tail is all that can still be part of a question.
+    if(this.finalText.length > TB_VOICE_TAIL) this.finalText = this.finalText.slice(-TB_VOICE_TAIL);
+    const raw = (this.finalText + interim).replace(/\s+/g, ' ').trim();
+    if(!raw) return;
+    // tbStripVi only removes combining marks, so an index in the stripped
+    // string is the same index in the original — which is what lets the wake
+    // phrase be matched without accents while the question keeps them.
+    const flat = tbStripVi(raw);
+    // The LAST "Hey Tobby", not the first. Someone who starts a question, stops
+    // and starts it again has said the phrase twice, and the one that counts is
+    // the one they finished on — matching the first would put the abandoned
+    // half of the sentence into the question.
+    let m = null, g = new RegExp(TB_WAKE.source, 'g'), hit;
+    while((hit = g.exec(flat)) !== null) m = hit;
+    if(!m){ this.paint(TB_L('Đang nghe: ','Hearing: ') + raw.slice(-60)); return; }
+
+    this.heardWake = true;
+    const question = raw.slice(m.index + m[0].length).replace(/^[\s,.:;!?-]+/, '').trim();
+    this.paint(question
+      ? TB_L('Nghe được: ','Heard: ') + question
+      : TB_L('Đã nghe “Hey Tobby” — đang nghe câu hỏi…','Got “Hey Tobby” — listening for the question…'));
+
+    // Every new word pushes the deadline back; the question is finished when
+    // the words stop, not when the recogniser decides a phrase is final.
+    clearTimeout(this.timer);
+    if(!question) return;
+    this.timer = setTimeout(()=> this.submit(question), TB_VOICE_GAP_MS);
+  },
+
+  /** Type it in and press Ask. Nothing here knows what a question means. */
+  submit(question){
+    const o = this.overlay;
+    this.reset();
+    if(!o || !this.on) return;
+    const box = o.querySelector('[data-q]');
+    const form = o.querySelector('[data-ask]');
+    if(!box || !form) return;
+    box.value = question;
+    try{ form.requestSubmit(); }
+    catch(e){ form.onsubmit && form.onsubmit(new Event('submit', {cancelable:true})); }
+    // The panel has just been rebuilt around us; re-bind to the new button and
+    // go back to waiting for the next "Hey Tobby". The session continues.
+    this.paint();
+  },
+};
+
 /* ---------------------------------------------------------
    The main panel: ask him something, do something quickly, or go and look
    after him. Care is one entry rather than three sections — dishes, colours
@@ -15430,7 +15790,14 @@ function tobbyAsk(text){
    --------------------------------------------------------- */
 function tobbyPanel(opt){
   const L2 = TB_L;
-  const pop = tobbyPopup('\ud83d\udc36 Tobby', ()=> tobbyTypingStop(), opt);
+  // Closing the panel ends the microphone session and stops any answer still
+  // being read. A page that keeps the recording indicator lit after its window
+  // is gone is a page nobody trusts twice.
+  const pop = tobbyPopup('\ud83d\udc36 Tobby', ()=>{
+    tobbyTypingStop();
+    try{ TobbyVoice.stop(true); }catch(e){}
+    tobbyVoiceShutUp();
+  }, opt);
   const overlay = pop.el;
   const close = pop.close;
   // Today's thread, read when the panel opens. Nothing is cleared on a timer:
@@ -15461,6 +15828,7 @@ function tobbyPanel(opt){
     aiArmed = false;
     draw();
     focusAsk();
+    speakTurn(turn);
   }
   /** Swap the last turn — used to replace “Tobby đang nghĩ…” with the answer
    *  rather than leaving both of them in the thread. */
@@ -15469,6 +15837,18 @@ function tobbyPanel(opt){
     tbChatSave(chatLog);
     aiArmed = false;
     draw();
+    speakTurn(turn);
+  }
+  /** Read it out, if reading out is switched on.
+   *
+   *  These two functions are every path by which a finished answer reaches the
+   *  screen — the instant ones through pushTurn, the model's through
+   *  replaceLastTurn — so hooking both is the whole of it. "Tobby đang nghĩ…"
+   *  is skipped: it is a placeholder that is about to be replaced, and hearing
+   *  it read aloud before the answer would be worse than silence. */
+  function speakTurn(turn){
+    if(!turn || turn.role !== 'tobby' || turn.thinking) return;
+    tobbyVoiceSpeak(turn.text);
   }
 
   function draw(){
@@ -15525,14 +15905,28 @@ function tobbyPanel(opt){
         '</div>' : '') +
 
         '<div class="tb-sec">' + L2('H\u1ecfi Tobby','Ask Tobby') + '</div>' +
-        '<form class="tb-ask" data-ask>' +
-          '<input type="text" data-q placeholder="' +
-            esc(L2('H\u1ecfi v\u1ec1 c\u00f4ng vi\u1ec7c c\u1ee7a b\u1ea1n\u2026','Ask about your work\u2026')) + '">' +
-          '<button type="submit">' + L2('H\u1ecfi','Ask') + '</button>' +
-        '</form>' +
-        '<div class="tb-chips">' + TB_QUESTIONS.map(q=>
-          '<button class="tb-chip" data-q-key="' + q[0] + '">' + esc(LANG==='en'?q[2]:q[1]) + '</button>').join('') + '</div>' +
-
+        // One control beside the box, not two: Enter sends, so a send button
+        // was a second way to do the thing the keyboard already does. The
+        // microphone stays because speaking is the thing Enter cannot do \u2014 and
+        // it is not a second route into the app either, it fills this input and
+        // submits this form. attach() removes it where the browser has no
+        // recogniser, which leaves the box on its own, which is fine.
+        '<div class="tb-ask-wrap">' +
+          '<form class="tb-ask" data-ask>' +
+            '<input type="text" data-q autocomplete="off" enterkeyhint="send" placeholder="' +
+              esc(L2('H\u1ecfi v\u1ec1 c\u00f4ng vi\u1ec7c c\u1ee7a b\u1ea1n\u2026','Ask about your work\u2026')) + '">' +
+            '<button type="button" class="tb-mic" data-voice-mic aria-label="' +
+              esc(L2('H\u1ecfi b\u1eb1ng gi\u1ecdng n\u00f3i','Ask by voice')) + '">\ud83c\udf99\ufe0f</button>' +
+          '</form>' +
+          // The stock questions used to be a permanent row of chips under the
+          // box, taking space whether or not anyone wanted them. They are the
+          // same seven questions; they just wait until the box is being used
+          // and narrow down as it is typed into.
+          '<div class="tb-suggest" data-suggest role="listbox" hidden></div>' +
+        '</div>' +
+        // What it is hearing, shown back. Talking into a box that gives no sign
+        // of listening is the fastest way to decide a feature is broken.
+        '<div class="tb-mic-status" data-voice-status hidden></div>' +
         '<div class="tb-sec">' + L2('L\u00e0m nhanh','Quick actions') + '</div>' +
         '<div class="tb-grid">' +
           '<button class="tb-pick" data-do="task"><i>\u2795</i>' + L2('Nhi\u1ec7m v\u1ee5 m\u1edbi','New task') + '</button>' +
@@ -15561,19 +15955,138 @@ function tobbyPanel(opt){
   }
 
   function wire(){
+    // Every draw() replaces the mic button, so it is re-bound here rather than
+    // once at open. The session itself lives on TobbyVoice and survives the
+    // rebuild — which is what lets one "Hey Tobby" be followed by another
+    // without touching the button again.
+    try{ TobbyVoice.attach(overlay); }catch(e){}
     const say = (r)=> pushTurn(Object.assign({ role:'tobby' }, r));
-    overlay.querySelectorAll('[data-q-key]').forEach(b=> b.onclick = (e)=>{
-      e.stopPropagation();
-      // The chip's own label is what the user 'said'. An answer with no
-      // question above it reads as coming from nowhere.
-      pushTurn({ role:'user', text: b.textContent.trim() });
-      say(tobbyAnswer(b.dataset.qKey));
-    });
     const input = overlay.querySelector('[data-q]');
-    // He types while you type. Tobby_Typing is one of the three clips that
-    // bring prop_workstation with them, so a desk appears under his paws for
-    // as long as the conversation is live.
-    if(input) input.oninput = ()=> tobbyTypingPulse();
+
+    /* ---- the stock questions, as a suggestion list ----
+       Same seven questions as the old chip row, and the same two lines that
+       answer them; what changed is when they are on screen. A permanent row
+       of chips is a menu, and a menu under a text box is a hint that typing
+       into the box was not really the idea. This waits until the box has the
+       caret, and narrows as it is typed into.
+
+       The rows are rebuilt on every keystroke, so the click is delegated to
+       the container rather than bound per row — nothing to re-bind, and no
+       handler left pointing at a button that no longer exists. */
+    const sug = overlay.querySelector('[data-suggest]');
+    const sugLabel = (r)=> LANG === 'en' ? r[2] : r[1];
+    let sugRows = [], sugIdx = -1;
+
+    /* The panel scrolls, and the list is positioned inside it, so it is the
+       popup's edge that cuts the list off rather than the window's. Drop it
+       downwards when there is room and upwards when there is not, and cap the
+       height to whatever room there actually is — a list showing four of seven
+       with no sign that three are missing is worse than a short list. */
+    const sugPlace = ()=>{
+      const pop = sug.closest('.tb-pop');
+      if(!pop) return;
+      sug.classList.remove('up');
+      const ir = input.getBoundingClientRect(), pr = pop.getBoundingClientRect();
+      const below = pr.bottom - ir.bottom - 14;
+      const above = ir.top - pr.top - 14;
+      const up = below < 132 && above > below;
+      if(up) sug.classList.add('up');
+      sug.style.maxHeight = Math.max(84, Math.min(216, up ? above : below)) + 'px';
+    };
+    const sugPaint = ()=>{
+      sug.innerHTML = sugRows.map((r, i)=>
+        '<button type="button" class="tb-sug' + (i === sugIdx ? ' on' : '') + '"' +
+        ' role="option" aria-selected="' + (i === sugIdx) + '"' +
+        ' data-q-key="' + r[0] + '">' + esc(sugLabel(r)) + '</button>').join('');
+      sug.hidden = !sugRows.length;
+      if(!sug.hidden){
+        sugPlace();
+        // Keep the arrow-key selection inside the visible part of the list.
+        const on = sug.querySelector('.tb-sug.on');
+        if(on && on.scrollIntoView) on.scrollIntoView({ block:'nearest' });
+      }
+    };
+    const sugOpen = ()=>{
+      if(!sug || !input) return;
+      // Accent-blind, like every other search in this file: nobody types
+      // diacritics into a box in a hurry.
+      const q = tbStripVi(input.value).trim();
+      sugRows = TB_QUESTIONS.filter(r=> !q || tbStripVi(sugLabel(r)).includes(q));
+      sugIdx = -1;
+      sugPaint();
+    };
+    const sugClose = ()=>{ sugRows = []; sugIdx = -1; if(sug){ sug.hidden = true; sug.innerHTML = ''; } };
+    const sugPick = (key, label)=>{
+      sugClose();
+      // The label is what the user "said". An answer with no question above it
+      // reads as coming from nowhere.
+      pushTurn({ role:'user', text: label });
+      say(tobbyAnswer(key));
+    };
+
+    if(sug){
+      // mousedown rather than a timeout on blur: preventing it keeps the caret
+      // in the box, so the list is still open when the click lands.
+      sug.addEventListener('mousedown', (e)=> e.preventDefault());
+      sug.onclick = (e)=>{
+        const b = e.target.closest && e.target.closest('[data-q-key]');
+        if(!b) return;
+        e.stopPropagation();
+        sugPick(b.dataset.qKey, b.textContent.trim());
+      };
+    }
+    if(input){
+      // He types while you type. Tobby_Typing is one of the three clips that
+      // bring prop_workstation with them, so a desk appears under his paws for
+      // as long as the conversation is live.
+      input.oninput = ()=>{ tobbyTypingPulse(); sugOpen(); };
+      // Click rather than focus. Every answer hands the caret back to this box
+      // (see focusAsk), and opening on focus meant a seven-item menu unrolled
+      // over the reply the moment it arrived. A click is always something the
+      // user did; ArrowDown below is the keyboard's way in.
+      input.onclick = sugOpen;
+      input.onblur  = ()=> sugClose();
+      input.onkeydown = (e)=>{
+        // Enter sends. Spelled out rather than left to the browser's implicit
+        // submission, which only fires when the form has a submit button or
+        // exactly one field — true here today, and quietly untrue the moment a
+        // second input is ever added to this row. preventDefault keeps the two
+        // routes from both firing and asking the same question twice.
+        if(e.key === 'Enter' && !e.shiftKey && !e.isComposing && sugIdx < 0){
+          e.preventDefault();
+          const f = overlay.querySelector('[data-ask]');
+          if(f) f.requestSubmit ? f.requestSubmit() : f.onsubmit(new Event('submit', {cancelable:true}));
+          return;
+        }
+        if(!sugRows.length){
+          if(e.key === 'ArrowDown') sugOpen();
+          return;
+        }
+        if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+          e.preventDefault();
+          const step = e.key === 'ArrowDown' ? 1 : -1;
+          // There are n+1 states, not n: "nothing selected" is one of them, and
+          // arrowing off either end lands back on it rather than trapping the
+          // caret in the list. Counting is done on a 0-based slot (index + 1)
+          // and converted back, because -1 does not survive a modulo.
+          const n = sugRows.length;
+          sugIdx = ((sugIdx + 1) + step + (n + 1)) % (n + 1) - 1;
+          sugPaint();
+          return;
+        }
+        // stopPropagation as well as preventDefault: the popup closes itself on
+        // Escape, and one press should dismiss one thing. With the list open
+        // that thing is the list; press it again and the panel goes.
+        if(e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); sugClose(); return; }
+        // Enter takes the highlighted suggestion if there is one, and otherwise
+        // sends what was typed.
+        if(e.key === 'Enter' && sugIdx >= 0 && sugRows[sugIdx]){
+          e.preventDefault();
+          const r = sugRows[sugIdx];
+          sugPick(r[0], sugLabel(r));
+        }
+      };
+    }
     const form = overlay.querySelector('[data-ask]');
     if(form) form.onsubmit = (e)=>{
       e.preventDefault(); e.stopPropagation();
