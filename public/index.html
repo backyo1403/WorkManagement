@@ -3080,6 +3080,32 @@ body{
   z-index:1002;
   transform:translateX(var(--tb-evo-dx, 0px)) scale(var(--tb-evo-scale, 1.55));
 }
+/* And this is what makes that 1002 mean anything.
+   #app is position:relative with z-index:1, so it is a stacking context, and
+   the dock lives inside it. Every z-index on the dock is therefore ordered
+   only against its siblings INSIDE #app — against the veil, which is appended
+   to <body>, the whole of #app is a single layer at z-index 1. The veil at
+   1000 painted over the entire app including him: the one thing the sequence
+   exists to show was the one thing behind the dim.
+   Dropping the z-index for the duration stops #app being a stacking context,
+   so the dock's 1002 competes with the veil directly. Nothing else in here
+   goes near it — the highest z-index anywhere inside #app is 400 — so
+   everything else stays where it was, and stays dimmed.
+   Keyed to the attribute without a value, so it also holds through the walk
+   back, while the attribute is "0" and he is still over the page. */
+#app:has(.tobby-dock[data-evolving]){z-index:auto;}
+/* The same problem, one layer over: his effects and his bubble hang off <body>
+   at 131, which is under the veil at 1000, so the sparks and the puffs of an
+   evolution were being blurred along with the page they were drawn over. They
+   are not page — they are him — so for the duration they go up with him.
+   1002 rather than 1003: the same level as the dock, and since #app comes
+   before them in the document the particles land in front of him, which is
+   where effects that come off a body belong. The card at 1003 still wins,
+   because a glyph over the words naming what he became is worse than a glyph
+   hidden behind them. */
+:root:has(.tobby-dock[data-evolving]) .tb-vfx,
+:root:has(.tobby-dock[data-evolving]) .tb-vfx-loop,
+:root:has(.tobby-dock[data-evolving]) .tb-speech{z-index:1002;}
 .tobby-dock[data-evolving="1"] canvas{image-rendering:pixelated;}
 .tb-evo-card{
   position:fixed; z-index:1003; left:50%; top:38%;
