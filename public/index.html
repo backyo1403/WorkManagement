@@ -1731,24 +1731,95 @@ a{color:inherit;}
   --cd-bi:#5ccfe6;      /* builtins and modules                  */
   --cd-op:#8a94a6;      /* punctuation                           */
   --cd-accent:#5ccfe6;  /* the caret                             */
-  /* The file is longer than the window and scrolls, like any file open in an
-     editor. #app is a fixed-height flex row with overflow hidden, so the
-     scrolling has to happen in here rather than on the document. */
-  height:100vh; height:100dvh; width:100%; overflow-y:auto; overflow-x:hidden;
+  /* Chrome of the window around the listing: a shade off the editor ground, the
+     way a tab strip and a panel bar are in any editor. */
+  --cd-chrome:#080b11; --cd-rule:#1b2330; --cd-dim:#6b7686;
+  /* The editor fills the window edge to edge. It is a whole screen pretending
+     to be an application, so a strip of the app's own pale ground showing at
+     the margins is the one thing that gives it away — see the #app rules
+     below, which are what actually take the padding off. */
+  height:100%; width:100%; overflow:hidden;
+  display:flex; flex-direction:column;
   background:var(--cd-bg); color:var(--cd-txt);
   font-family:'SF Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
   font-size:13px; line-height:1.72; letter-spacing:.01em;
+}
+/* The listing is longer than the window and scrolls; the tab strip above it and
+   the panel bar below it do not. So the scroll lives on this middle band, not
+   on .code-login and not on the document. */
+.code-body{
+  flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden;
   padding-block:10px;
 }
-body.is-login #app{display:block;}
+/* Every #app breakpoint pads the shell so the two panels float. The login
+   screen is not two panels — it is one window filling the glass — and any
+   padding here shows as a lighter frame around a dark editor. Both selectors
+   are needed: :root[data-group] out-specifies a lone body class. */
+body.is-login #app,
+:root[data-group] body.is-login #app{
+  display:block; padding:0; gap:0; height:100vh; height:100dvh; overflow:hidden;
+}
+/* The gradient on <body> is what shows through anywhere #app does not paint —
+   during the swap, and past the safe-area inset on a phone. */
+body.is-login{background:#0d1017;}
 /* The header above the prompt is kept short on purpose: it is what decides
    whether the two fields are on screen before anyone scrolls. Everything long
    goes below them, where scrolling is the point. */
-.code-login::-webkit-scrollbar{width:10px;}
-.code-login::-webkit-scrollbar-thumb{background:#232b38; border-radius:6px;}
-.code-login::-webkit-scrollbar-track{background:transparent;}
+.code-body::-webkit-scrollbar{width:10px;}
+.code-body::-webkit-scrollbar-thumb{background:#232b38; border-radius:6px;}
+.code-body::-webkit-scrollbar-track{background:transparent;}
 /* Nothing moves on this screen, including the things that are not part of it. */
 body.is-login .weather-layer{display:none;}
+
+/* ---------- the window around the file ----------
+   A tab strip and a breadcrumb above, an output panel bar below. None of it
+   does anything: it is the frame that says which file this is and what is
+   running it, which is what an editor screenshot is mostly made of. The
+   controls are inert by construction — spans, not buttons — so nothing here
+   can take focus away from the two fields or be reached by Tab. */
+.code-chrome{flex:0 0 auto; background:var(--cd-chrome); user-select:none; -webkit-user-select:none;}
+.code-tabs{display:flex; align-items:stretch; height:35px; border-bottom:1px solid var(--cd-rule);}
+.code-tab{
+  display:flex; align-items:center; gap:8px; padding:0 11px 0 13px;
+  background:var(--cd-bg); color:var(--cd-txt); font-size:12.5px;
+  border-right:1px solid var(--cd-rule);
+  /* The accent rule along the top edge is how an editor marks the tab you are
+     actually looking at. */
+  box-shadow:inset 0 1px 0 var(--cd-accent);
+}
+/* A "py" badge rather than a snake: an emoji-presentation glyph ignores CSS
+   colour, and this one has to sit in a two-colour palette. */
+.ct-py{
+  flex:0 0 auto; font-size:8.5px; font-weight:800; letter-spacing:.02em;
+  padding:1px 3px; border-radius:3px; line-height:1.25;
+  background:linear-gradient(135deg,#4B8BBE 50%,#FFD43B 50%); color:#0d1017;
+}
+.ct-x{color:var(--cd-dim); font-size:14px; line-height:1; padding-left:2px;}
+/* Once the file has been touched, the close cross becomes the unsaved dot —
+   which is the editor's own way of saying the buffer no longer matches disk. */
+.code-login.dirty .ct-x{font-size:17px; color:var(--cd-txt);}
+.code-tab-fill{flex:1 1 auto;}
+.code-tab-tools{display:flex; align-items:center; gap:13px; padding:0 14px; color:var(--cd-dim); font-size:12px;}
+.code-crumbs{
+  display:flex; align-items:center; gap:6px; flex-wrap:nowrap; overflow:hidden;
+  padding:3px 18px 5px; font-size:11.5px; color:var(--cd-dim); white-space:nowrap;
+}
+.code-crumbs i{font-style:normal; opacity:.55;}
+.code-crumbs b{font-weight:400; color:#8b96a6;}
+/* The output panel, closed. Only its tab row shows, which is all the screenshot
+   of a full-height editor ever shows of it. */
+.code-panel{
+  flex:0 0 auto; display:flex; align-items:center; height:31px;
+  background:var(--cd-chrome); border-top:1px solid var(--cd-rule);
+  padding:0 12px 0 18px; font-size:10.5px; letter-spacing:.07em;
+  color:var(--cd-dim); user-select:none; -webkit-user-select:none;
+}
+.cp-tabs{display:flex; align-items:center; gap:17px; min-width:0; overflow:hidden;}
+.cp-tab{white-space:nowrap;}
+.cp-tab.on{color:var(--cd-txt); box-shadow:inset 0 -1px 0 var(--cd-txt);}
+.cp-fill{flex:1 1 auto;}
+.cp-tools{display:flex; align-items:center; gap:12px; font-size:11px; letter-spacing:0;}
+.cp-tools .cp-runtime{display:flex; align-items:center; gap:5px; color:#8b96a6;}
 /* One line of the listing: gutter, then the code itself. */
 .cl{display:flex; align-items:baseline; white-space:pre; padding:0 18px;}
 .cl .ln{flex:0 0 auto; width:3.2em; margin-right:1.1em; text-align:right;
@@ -1812,11 +1883,36 @@ body.is-login .weather-layer{display:none;}
 .cd-err{color:var(--cd-kw); font-weight:600;}
 .login-error{background:var(--danger-soft); color:var(--danger); border-radius:9px; padding:9px 12px;
   font-size:12.5px; font-weight:600; margin-bottom:12px;}
+
+/* ---------- the listing is editable ----------
+   Click anywhere and you get a caret; type and the characters land. Nothing
+   reads this text back — the only two values the screen has an opinion about
+   are the ones in the <input>s — so it is a real editor over a file that
+   cannot be saved, which is exactly what the frame around it claims.
+   contenteditable rather than a drawn fake caret: it brings selection, the
+   arrow keys, double-click-a-word, drag-select and IME with it, and every one
+   of those is something a fake would have to be caught not doing. */
+.code-block{caret-color:var(--cd-accent); outline:0;}
+.code-block:focus, .code-block:focus-visible{outline:0;}
+.cl .lc{cursor:text;}
+/* The gutter is contenteditable="false", so it cannot be typed into — but a
+   selection dragged across it would still highlight the numbers. */
+.cl .ln{cursor:default;}
+.code-login ::selection{background:#264f78; color:inherit;}
 @media (max-width:700px){
   .code-login{font-size:11.5px; line-height:1.68;}
   .cl{padding:0 10px;}
   .cl .ln{width:2.4em; margin-right:.7em;}
   .code-repl input{max-width:52vw;}
+  /* The frame stays, shortened: the breadcrumb is the first thing worth losing
+     when the two fields are competing for a phone's vertical space. */
+  .code-crumbs{display:none;}
+  .code-tabs{height:32px;}
+  .code-tab{font-size:11.5px; padding:0 9px 0 10px;}
+  .code-panel{height:28px; padding:0 8px 0 10px; font-size:9.5px;}
+  /* The runtime and the panel's own controls are the first to go: on a phone
+     they are five glyphs shoving PROBLEMS and TERMINAL off their own row. */
+  .cp-tools, .code-tab-tools{display:none;}
 }
 
 /* =========================================================
@@ -4510,7 +4606,10 @@ function viewLogin(){
   // One counter across the whole screen: an unbroken gutter is most of what
   // makes this read as a single file rather than three stacked panels.
   let n = 0;
-  const line = (html)=> '<div class="cl"><span class="ln">' + (++n) + '</span><span class="lc">' + html + '</span></div>';
+  // The gutter is marked uneditable inside an editable block: the line numbers
+  // are the editor drawing on the file, not part of it, and a caret that can
+  // be put between two digits of "142" gives that away immediately.
+  const line = (html)=> '<div class="cl"><span class="ln" contenteditable="false">' + (++n) + '</span><span class="lc">' + html + '</span></div>';
   const code = (src)=> line(pyLine(src));
   const raw  = (html)=> line(html);
   const sp   = (cls, text)=> '<span class="cd-' + cls + '">' + esc(text) + '</span>';
@@ -4555,10 +4654,59 @@ function viewLogin(){
     raw('<button type="submit" class="code-go" id="loginBtn" ' +
         'title="Đăng nhập" aria-label="Đăng nhập">#</button>');
 
-  return '<div class="code-login">' +
-    '<div class="code-block">' + above + '</div>' +
-    '<form class="code-repl" id="loginForm" autocomplete="on">' + repl + '</form>' +
-    '<div class="code-block">' + LOGIN_CODE_BELOW.map(code).join('') + '</div>' +
+  // The two halves of the listing are editable; the transcript between them is
+  // not. That split is not a compromise — it is the rule the screen runs on.
+  // Everything that is only a picture of code can be typed into and changes
+  // nothing; the two lines that are actually wired to something are ordinary
+  // inputs in an ordinary <form>, and they are the only lines that are.
+  // tabindex="-1" because a contenteditable element is focusable by default,
+  // and two of them either side of the form would put a decoration first in
+  // the keyboard path. Clicking still focuses it and typing still works; Tab
+  // goes username → password → submit, which is the only order that is any
+  // use to someone who is here to sign in.
+  const block = (html)=> '<div class="code-block" contenteditable="plaintext-only" tabindex="-1" ' +
+    'spellcheck="false" autocorrect="off" autocapitalize="off" ' +
+    'role="textbox" aria-multiline="true" aria-label="bach-office.py">' + html + '</div>';
+
+  return '<div class="code-login" id="codeLogin">' + viewLoginChrome() +
+    '<div class="code-body">' +
+      block(above) +
+      // contenteditable is inherited, so the form has to opt out explicitly or
+      // the two assignment lines become editable text around the fields.
+      '<form class="code-repl" id="loginForm" autocomplete="on" contenteditable="false">' + repl + '</form>' +
+      block(LOGIN_CODE_BELOW.map(code).join('')) +
+    '</div>' + viewLoginPanel() +
+  '</div>';
+}
+/** The tab strip and breadcrumb above the file. Decoration all the way down:
+ *  no buttons, no handlers, nothing focusable. */
+function viewLoginChrome(){
+  return '<div class="code-chrome">' +
+    '<div class="code-tabs">' +
+      '<div class="code-tab"><span class="ct-py">py</span>bach-office.py' +
+        '<span class="ct-x" aria-hidden="true">×</span></div>' +
+      '<div class="code-tab-fill"></div>' +
+      '<div class="code-tab-tools" aria-hidden="true"><span>▷</span><span>⌄</span><span>▤</span><span>⋯</span></div>' +
+    '</div>' +
+    '<div class="code-crumbs" aria-hidden="true">' +
+      '<b>bach-office</b><i>›</i><b>auth.py</b><i>›</i><b>SessionGate</b><i>›</i><span>…</span>' +
+    '</div>' +
+  '</div>';
+}
+/** The output panel bar along the bottom, closed — which is all of it a
+ *  full-height editor ever shows. */
+function viewLoginPanel(){
+  return '<div class="code-panel">' +
+    '<div class="cp-tabs" aria-hidden="true">' +
+      '<span class="cp-tab">PROBLEMS</span>' +
+      '<span class="cp-tab on">TERMINAL</span>' +
+      '<span class="cp-tab">⋯</span>' +
+    '</div>' +
+    '<div class="cp-fill"></div>' +
+    '<div class="cp-tools" aria-hidden="true">' +
+      '<span class="cp-runtime"><span class="ct-py">py</span>Python</span>' +
+      '<span>+</span><span>⌄</span><span>▤</span><span>🗑</span><span>⋯</span><span>⛶</span><span>✕</span>' +
+    '</div>' +
   '</div>';
 }
 function wireLogin(){
@@ -4607,9 +4755,151 @@ function wireLogin(){
   // zero width is the one way these lines can look broken on arrival.
   setTimeout(()=>{ fit(user); fit(pass); }, 400);
 
+  wireCodeEditing();
+
   // Deliberately no focus() here: the page opens as a file being read, and
   // stealing the caret into a field is the one thing that would give away that
   // it is a form.
+}
+
+/* ---------- typing into the listing ----------
+   The two halves of the file are contenteditable, so a click puts a caret
+   wherever it lands and the keyboard works: selection, the arrow keys,
+   double-click-a-word, undo, IME, the lot. None of it is read back by
+   anything. What is typed here is not saved, not sent, and not consulted at
+   login — attemptLogin() sees the two <input> values and nothing else — so the
+   file behaves like a file the process has open and can never write.
+
+   Three edits have to be caught, all of them for the same reason: the gutter
+   is a contenteditable="false" span at the head of every line, and an edit
+   that crosses it either lands a caret inside a line number or merges two
+   lines into one that then carries two numbers. */
+function wireCodeEditing(){
+  const root = document.getElementById('codeLogin');
+  if(!root) return;
+  const blocks = root.querySelectorAll('.code-block');
+
+  // plaintext-only keeps a paste from bringing its own markup in. It is not
+  // universal; where it is not understood the element would not be editable at
+  // all, so fall back to plain contenteditable and strip the paste by hand.
+  blocks.forEach(b=>{
+    if(b.contentEditable !== 'plaintext-only'){
+      b.contentEditable = 'true';
+      b.addEventListener('paste', (e)=>{
+        e.preventDefault();
+        const text = (e.clipboardData || window.clipboardData).getData('text');
+        document.execCommand('insertText', false, text.replace(/\r?\n/g, ' '));
+      });
+    }
+  });
+
+  /** How much of `lc` lies on one side of the caret, as a character count. */
+  const distance = (lc, node, offset, toEnd)=>{
+    const r = document.createRange();
+    r.selectNodeContents(lc);
+    if(toEnd) r.setStart(node, offset);
+    else r.setEnd(node, offset);
+    return r.toString().length;
+  };
+  /** One unbroken run of numbers down the whole screen, transcript included —
+   *  which is most of what makes three stacked elements read as one file. */
+  const renumber = ()=>{
+    let i = 0;
+    root.querySelectorAll('.cl .ln').forEach(ln=>{ ln.textContent = String(++i); });
+  };
+
+  /** Where the caret is, if it is inside one of the two editable blocks. */
+  const caretLine = (block)=>{
+    const sel = getSelection();
+    if(!sel || !sel.rangeCount) return null;
+    const range = sel.getRangeAt(0);
+    const from = range.startContainer;
+    const host = from.nodeType === 1 ? from : from.parentElement;
+    const lc = host && host.closest('.lc');
+    if(!lc || !block.contains(lc)) return null;
+    return { sel, range, lc };
+  };
+
+  blocks.forEach(block=>{
+    // Enter is caught on keydown rather than as an insertParagraph beforeinput,
+    // because in a plaintext-only block Chrome reports it only as a keydown —
+    // no beforeinput is dispatched and nothing is inserted, so a handler
+    // waiting on the input event waits for ever. Preventing the keydown is
+    // also what guarantees the two paths cannot both run.
+    block.addEventListener('keydown', (e)=>{
+      if(e.key !== 'Enter' || e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
+      const at = caretLine(block);
+      if(!at) return;
+      e.preventDefault();
+      // A new line in the file, carrying a number of its own and the indent of
+      // the line it came from — the two things a browser would leave out.
+      const { sel, range, lc } = at;
+      if(!range.collapsed) range.deleteContents();
+      const tail = range.cloneRange();
+      tail.setEnd(lc, lc.childNodes.length);
+      const carried = tail.extractContents();
+      const indent = (lc.textContent.match(/^[ \t]*/) || [''])[0];
+
+      const row = document.createElement('div');
+      row.className = 'cl';
+      const gutter = document.createElement('span');
+      gutter.className = 'ln';
+      gutter.contentEditable = 'false';
+      const body = document.createElement('span');
+      body.className = 'lc';
+      if(indent) body.appendChild(document.createTextNode(indent));
+      body.appendChild(carried);
+      row.append(gutter, body);
+      lc.closest('.cl').after(row);
+      renumber();
+
+      const put = document.createRange();
+      put.setStart(body, indent ? 1 : 0);
+      put.collapse(true);
+      sel.removeAllRanges(); sel.addRange(put);
+      markCodeDirty();
+    });
+
+    block.addEventListener('beforeinput', (e)=>{
+      const at = caretLine(block);
+      if(!at) return;
+      const { sel, range, lc } = at;
+      const type = e.inputType;
+      // Backspace on an empty line takes the whole line away, numbers and all.
+      // Anywhere else at the start of a line it does nothing: merging into the
+      // line above would pull the text through a gutter that is not text.
+      if(range.collapsed && type.startsWith('delete') && type.indexOf('Backward') > 0){
+        if(distance(lc, range.startContainer, range.startOffset, false) !== 0) return;
+        e.preventDefault();
+        const row = lc.closest('.cl'), prev = row.previousElementSibling;
+        if(!lc.textContent.length && prev && prev.querySelector('.lc')){
+          const into = prev.querySelector('.lc');
+          row.remove();
+          renumber();
+          const at = document.createRange();
+          at.selectNodeContents(into); at.collapse(false);
+          sel.removeAllRanges(); sel.addRange(at);
+          markCodeDirty();
+        }
+        return;
+      }
+      // And Delete at the end of a line, which is the same merge from the other
+      // side.
+      if(range.collapsed && type.startsWith('delete') && type.indexOf('Forward') > 0){
+        if(distance(lc, range.startContainer, range.startOffset, true) === 0) e.preventDefault();
+      }
+    });
+    block.addEventListener('input', markCodeDirty);
+  });
+}
+/** The close cross on the tab becomes the unsaved dot, once. An editor showing
+ *  an edited buffer with a clean tab is the detail that reads as wrong. */
+function markCodeDirty(){
+  const root = document.getElementById('codeLogin');
+  if(!root || root.classList.contains('dirty')) return;
+  root.classList.add('dirty');
+  const x = root.querySelector('.ct-x');
+  if(x) x.textContent = '●';
 }
 
 /* --- idle auto-lock --- */
