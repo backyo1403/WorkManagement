@@ -13018,8 +13018,10 @@ function tbActionVocabulary(){
   return Object.keys(AI_ACTIONS).map(k=>{
     const d = AI_ACTIONS[k];
     const needs = d.needs.length ? d.needs.join(', ') : '—';
-    return '- ' + k + ' (payload bắt buộc: ' + needs + ')'
-      + (d.destructive ? '  [PHÁ HUỶ — chỉ đề xuất khi người dùng nói rõ muốn xoá]' : '');
+    const en = tobbyLang() === 'en';
+    return '- ' + k + (en ? ' (required payload: ' : ' (payload bắt buộc: ') + needs + ')'
+      + (d.destructive ? (en ? '  [DESTRUCTIVE — only propose when the user clearly asks to delete]'
+                             : '  [PHÁ HUỶ — chỉ đề xuất khi người dùng nói rõ muốn xoá]') : '');
   }).join('\n');
 }
 
@@ -13030,38 +13032,59 @@ function tbActionVocabulary(){
  *  plausible id — which validateAIAction would refuse anyway, leaving the
  *  user with an answer that quietly does nothing. */
 function tbBoardContext(){
+  // The table headings go to the model, not to the screen, so they follow the
+  // language the model is being instructed in. Vietnamese labels wrapped around
+  // English instructions is the kind of mixed prompt that makes a model pick a
+  // language at random — which is half of what was going wrong.
+  const en = tobbyLang() === 'en';
+  const L = (vi, e)=> en ? e : vi;
   const open = activeTasks()
     .filter(t=> !t.archived && t.status !== 'Hoàn thành' && !isFrozen(t));
   const overdue = open.filter(isOverdue).length;
   const today = open.filter(t=> isSameDay(t.deadline) && !isOverdue(t)).length;
   const fmt = (t)=> '  • id=' + t.id + ' | ' + String(t.title||'').slice(0,90)
-    + ' | hạn: ' + (t.deadline ? fmtDate(t.deadline) : 'không')
-    + ' | ' + (t.status||'') + ' | ưu tiên: ' + (t.priority||'');
-  const tasks = open.slice(0, 15).map(fmt).join('\n') || '  (không có việc nào đang mở)';
+    + L(' | hạn: ', ' | due: ') + (t.deadline ? fmtDate(t.deadline) : L('không','none'))
+    + ' | ' + (t.status||'') + L(' | ưu tiên: ', ' | priority: ') + (t.priority||'');
+  const tasks = open.slice(0, 15).map(fmt).join('\n')
+    || L('  (không có việc nào đang mở)', '  (nothing open)');
   const projects = (STATE.projects||[]).slice(0, 10)
     .map(p=> '  • id=' + p.id + ' | ' + String(p.name||p.title||'').slice(0,80)).join('\n')
-    || '  (chưa có dự án)';
+    || L('  (chưa có dự án)', '  (no projects yet)');
   // Titles only. A note's body is the user's own writing and has no business
   // leaving the browser to answer "which note did you mean".
   const notes = (STATE.notes||[]).filter(n=> !n.deletedAt && !n.archived)
-    .slice(0, 10).map(n=> '  • id=' + n.id + ' | ' + String(n.title||'(không tên)').slice(0,80)).join('\n')
-    || '  (chưa có ghi chú)';
+    .slice(0, 10).map(n=> '  • id=' + n.id + ' | ' + String(n.title||L('(không tên)','(untitled)')).slice(0,80)).join('\n')
+    || L('  (chưa có ghi chú)', '  (no notes yet)');
   return [
-    'BẢNG CÔNG VIỆC HIỆN TẠI (dữ liệu thật, dùng đúng id này):',
-    'Hôm nay là ' + fmtDate(nowISO()) + '. Đang mở ' + open.length + ' việc, '
-      + overdue + ' quá hạn, ' + today + ' đến hạn hôm nay.',
-    'NHIỆM VỤ ĐANG MỞ:', tasks,
-    'DỰ ÁN:', projects,
-    'GHI CHÚ (chỉ tiêu đề):', notes,
+    L('BẢNG CÔNG VIỆC HIỆN TẠI (dữ liệu thật, dùng đúng id này):',
+      'THE BOARD RIGHT NOW (real data — use exactly these ids):'),
+    L('Hôm nay là ', 'Today is ') + fmtDate(nowISO())
+      + L('. Đang mở ' + open.length + ' việc, ' + overdue + ' quá hạn, ' + today + ' đến hạn hôm nay.',
+          '. ' + open.length + ' open, ' + overdue + ' overdue, ' + today + ' due today.'),
+    L('NHIỆM VỤ ĐANG MỞ:', 'OPEN TASKS:'), tasks,
+    L('DỰ ÁN:', 'PROJECTS:'), projects,
+    L('GHI CHÚ (chỉ tiêu đề):', 'NOTES (titles only):'), notes,
   ].join('\n');
 }
 
 function tobbyAiSystemPrompt(){
+  /* The model is instructed in the language it is meant to answer in.
+     This was the last place Tobby's language was still hard-wired: the prompt
+     said "tiếng Việt" in the voice rule and again in the response format, so
+     the model did as it was told and answered in Vietnamese no matter what the
+     app was set to — which is exactly what an English voice was then reading
+     out. Writing the whole prompt in the target language, rather than bolting a
+     "reply in English" line onto Vietnamese instructions, is also what makes
+     the model actually keep to it. */
+  return tobbyLang() === 'en' ? tbAiPromptEn() : tbAiPromptVi();
+}
+function tbAiPromptVi(){
   return [
     'Bạn là Tobby — chú chó đồng hành trong app quản lý công việc Bach Office.',
     '',
     'GIỌNG VĂN:',
     '- Xưng “mình”, gọi người dùng là “bạn”. Thân mật, câu ngắn, tiếng Việt.',
+    '- LUÔN trả lời bằng tiếng Việt, kể cả khi người dùng hỏi bằng ngôn ngữ khác.',
     '- Là bạn đồng hành, không phải trợ lý doanh nghiệp. Không bao giờ trách móc',
     '  người dùng vì việc trễ hạn — nói cho họ biết, rồi giúp họ làm.',
     '- Trả lời gọn: một đến ba câu là đủ. Không gạch đầu dòng dài dòng.',
@@ -13074,10 +13097,6 @@ function tobbyAiSystemPrompt(){
     '- Chỉ dùng id có thật trong danh sách bên dưới. TUYỆT ĐỐI không bịa id.',
     '- Nếu không chắc chắn người dùng đang nói đến bản ghi nào, đặt action = null',
     '  và hỏi lại bằng chữ trong reply.',
-    // The old line here was a flat "chỉ nói những gì có trong bảng dưới đây",
-    // and the model read it the way it was written: as a ban on knowing
-    // anything at all. It refused to say when Tết falls. The rule was only ever
-    // meant to stop it inventing tasks.
     '- Về công việc/task/note/project: không bịa số liệu, chỉ nói những gì có',
     '  trong bảng dưới đây.',
     '- Về kiến thức chung ngoài app (ngày lễ, kiến thức phổ thông...): trả lời',
@@ -13100,6 +13119,48 @@ function tobbyAiSystemPrompt(){
     'Chỉ trả về JSON, không thêm chữ nào ngoài JSON:',
     '{"reply": "câu trả lời tiếng Việt", "action": {"type": "...", "payload": {...}} }',
     'hoặc {"reply": "...", "action": null} khi không cần làm gì.',
+  ].join('\n');
+}
+function tbAiPromptEn(){
+  return [
+    'You are Tobby — the dog companion inside Bach Office, a work management app.',
+    '',
+    'VOICE:',
+    '- Warm and familiar, short sentences, first person.',
+    '- ALWAYS reply in English, even when the user writes to you in another language.',
+    '- You are a companion, not a corporate assistant. Never scold the user for',
+    '  being late on something — tell them, then help them do it.',
+    '- Keep it brief: one to three sentences. No long bulleted lists.',
+    '',
+    'YOU MAY PROPOSE ONE ACTION. You never carry it out yourself.',
+    'Use only these types, and put only the listed fields in the payload:',
+    tbActionVocabulary(),
+    '',
+    'THE RULE ABOUT IDs — the most important one:',
+    '- Only use ids that genuinely appear in the tables below. NEVER invent an id.',
+    '- If you are not certain which record the user means, set action = null and',
+    '  ask them in the reply text.',
+    '- About tasks, notes and projects: invent no figures. Say only what is in',
+    '  the tables below.',
+    '- About general knowledge outside the app (holidays, common facts…): answer',
+    '  normally from what you know. If the question needs live data (prices,',
+    '  news, weather…), say plainly that you have none rather than inventing a',
+    '  specific number.',
+    '',
+    'SUGGESTING A CALENDAR ENTRY:',
+    '- When the user asks about a datable holiday or event (Christmas, New Year,',
+    '  Lunar New Year, an anniversary…) and you name a specific date in the reply',
+    '  (format DD-MM-YYYY), ALSO return a CREATE_TASK action with the event as',
+    '  the title and payload.dueDate set to that date — so one button adds it.',
+    '- Only propose this when you are GENUINELY sure of the date. If you are not,',
+    '  do not guess: say so in the reply and leave action = null.',
+    '',
+    tbBoardContext(),
+    '',
+    'RESPONSE FORMAT — required:',
+    'Return JSON only, with no text of any kind outside the JSON:',
+    '{"reply": "your answer in English", "action": {"type": "...", "payload": {...}} }',
+    'or {"reply": "...", "action": null} when nothing needs doing.',
   ].join('\n');
 }
 
@@ -13168,11 +13229,11 @@ function tbChatHistory(log){
  * has suggested something the allowlist accepts.
  */
 async function tobbyAskAI(text, history){
-  const fallback = { text: TB_L(
+  const fallback = { text: TB_SAY(
     'Mình trả lời được về: việc nên làm, việc gấp, việc quá hạn, việc đã xong, tuần này, việc nặng nhất.',
     'I can answer: what to do next, what is urgent, what is overdue, what is done, this week, the heaviest task.') };
   if(!aiEnabled()) return fallback;
-  if(!tbAiHasBudget()) return { text: TB_L(
+  if(!tbAiHasBudget()) return { text: TB_SAY(
     'Hôm nay hỏi nhiều rồi, mai hỏi tiếp Tobby nhé 😅',
     'That is a lot of questions for one day — ask me again tomorrow 😅') };
   try{
