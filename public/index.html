@@ -3236,6 +3236,16 @@ body{
    mouse and arrow keys driving this, two different highlights would be two
    answers to "which one does Enter take". */
 .tb-sug:hover, .tb-sug.on{background:var(--surface-2); color:var(--text);}
+/* Shown in Settings when the machine has no voice for the chosen language.
+   Warning-coloured rather than grey: it is the difference between the feature
+   working and the feature reading Vietnamese with an English mouth. */
+.tb-voice-warn{
+  margin-top:8px; padding:9px 11px; border-radius:10px; line-height:1.55;
+  font-size:11.5px; color:var(--text-2);
+  background:var(--warn-soft, color-mix(in srgb, #E0A23C 13%, transparent));
+  border:1px solid color-mix(in srgb, #E0A23C 32%, transparent);
+}
+.tb-voice-warn i{font-style:normal; color:var(--text); font-weight:600;}
 .tb-answer{
   margin-top:12px; padding:11px 13px; border-radius:0 12px 12px 0;
   background:color-mix(in srgb, var(--brand) 8%, var(--surface-2));
@@ -12173,11 +12183,11 @@ function settingsAmbiencePanel(){
     <select id="tobbyVoiceSelect" class="filter-select" style="width:100%;">
       <option value="">Tự động (khuyên dùng)</option>
     </select>
+    <div data-voice-note></div>
     <div style="font-size:11.5px;color:var(--text-3);margin-top:8px;line-height:1.55;">
       Danh sách giọng là giọng máy bạn đang có — trình duyệt không cho biết giọng thuộc
       vùng miền nào hay nam hay nữ, nên mục <b>Tự động</b> chỉ <i>đoán</i> lấy giọng nam
-      tiếng Việt nghe hợp nhất, không đảm bảo được. Máy không cài giọng tiếng Việt nào thì
-      Tobby vẫn đọc, bằng giọng mặc định của trình duyệt.
+      tiếng Việt nghe hợp nhất, không đảm bảo được.
     </div>`:''}`:''}
   </div>
   <div class="card" style="max-width:520px;">
@@ -15535,9 +15545,21 @@ function wireTobbyVoiceSettings(){
       '<option value="">' + esc('Tự động' + (auto ? ' — ' + auto.name : ' (khuyên dùng)')) + '</option>' +
       mine.map(v=> '<option value="' + esc(v.voiceURI) + '"' +
         (v.voiceURI === cur ? ' selected' : '') + '>' + esc(v.name) + '</option>').join('');
-    if(!mine.length){
-      sel.innerHTML += '<option value="" disabled>' +
-        esc('(Máy này chưa có giọng ' + (want === 'en' ? 'tiếng Anh' : 'tiếng Việt') + ' nào)') + '</option>';
+    // When the machine has no voice for this language, say so where the choice
+    // is being made and say what to do about it. The voices come from the
+    // operating system, not from the app and not from anything the app can
+    // install — so the only useful thing to put here is the route to the place
+    // that can. Empty when there is nothing to warn about.
+    const note = document.querySelector('[data-voice-note]');
+    if(note){
+      note.innerHTML = mine.length ? '' :
+        '<div class="tb-voice-warn">' +
+          '<b>Máy này chưa có giọng ' + (want === 'en' ? 'tiếng Anh' : 'tiếng Việt') + ' nào.</b> ' +
+          'Tobby vẫn đọc được, nhưng bằng giọng mặc định của trình duyệt — đọc tiếng Việt sẽ sai âm. ' +
+          'Giọng đọc do <b>hệ điều hành</b> cung cấp, ứng dụng không tự cài được. Trên Windows: ' +
+          '<i>Settings → Time &amp; language → Speech → Manage voices → Add voices</i>, chọn ' +
+          '<b>Tiếng Việt</b>, cài xong thì khởi động lại trình duyệt rồi quay lại đây chọn giọng.' +
+        '</div>';
     }
   };
   fill();
@@ -15629,8 +15651,21 @@ function tobbyVoiceShutUp(){ try{ speechSynthesis.cancel(); }catch(e){} }
  *  here — Vietnamese dictation does not spell an English name the same way
  *  twice, and the wake phrase is worth being generous about. */
 const TB_WAKE = /(?:hey|hay|hei|hi|he|ei)\s*,?\s*(?:tobby|tobbi|toby|tobi|topi|top\s?by|to\s?by|to\s?bi|tob)\b/;
-/** How long a pause means "I have finished the question". */
-const TB_VOICE_GAP_MS = 1200;
+/** How long a pause means "I have finished the question". Two seconds: people
+ *  stop mid-sentence to think, and cutting them off at one was sending half a
+ *  question. */
+const TB_VOICE_GAP_MS = 2000;
+/** The end of the question, out loud. Two short rising notes — "heard you,
+ *  sending it" — because the only other signal that the pause was long enough
+ *  is text appearing, and by then it has already gone. Routed through the same
+ *  synthesiser as every other sound here, so switching sound off switches this
+ *  off too. */
+function tobbyVoiceBeep(){
+  try{
+    playTone(720, 90, 0,     'sine', .10);
+    playTone(1080, 110, 0.075,'sine', .09);
+  }catch(e){}
+}
 /** How much of the running transcript is kept. Long enough for any question
  *  somebody would ask out loud, short enough that an hour of conversation in
  *  the same room does not accumulate in memory. */
@@ -15645,6 +15680,7 @@ const TB_VOICE_TAIL = 400;
 const TobbyVoice = {
   rec:null, overlay:null, on:false, byUser:false,
   finalText:'', heardWake:false, timer:0,
+  pending:'',          // the question heard so far, waiting for the pause
 
   supported(){ return !!(window.SpeechRecognition || window.webkitSpeechRecognition); },
 
@@ -15691,6 +15727,12 @@ const TobbyVoice = {
     // session was not ended on purpose, start it again so one silence does not
     // quietly end a session the user still believes is running.
     rec.onend = ()=>{
+      // A question that was still waiting on its two seconds of silence when
+      // the recogniser hung up is a finished question — there will be no more
+      // words for it, so send it now rather than letting the restart clear the
+      // buffer out from under the timer. This is the case the pause alone does
+      // not cover, and the one that loses a question silently.
+      if(this.pending && this.on) this.submit(this.pending);
       if(this.byUser || !this.on) return;
       try{ rec.start(); }catch(err){}
     };
@@ -15711,7 +15753,7 @@ const TobbyVoice = {
     this.paint();
   },
 
-  reset(){ this.finalText = ''; this.heardWake = false; clearTimeout(this.timer); },
+  reset(){ this.finalText = ''; this.heardWake = false; this.pending = ''; clearTimeout(this.timer); },
 
   onError(e){
     const err = e && e.error;
@@ -15754,26 +15796,49 @@ const TobbyVoice = {
 
     this.heardWake = true;
     const question = raw.slice(m.index + m[0].length).replace(/^[\s,.:;!?-]+/, '').trim();
+    // The hint says what to do next, because "stop talking" is not an obvious
+    // way to send something.
     this.paint(question
-      ? TB_L('Nghe được: ','Heard: ') + question
+      ? TB_L('Nghe được: ','Heard: ') + question +
+        TB_L('  · ngưng 2 giây để gửi','  · pause 2s to send')
       : TB_L('Đã nghe “Hey Tobby” — đang nghe câu hỏi…','Got “Hey Tobby” — listening for the question…'));
 
-    // Every new word pushes the deadline back; the question is finished when
-    // the words stop, not when the recogniser decides a phrase is final.
+    if(!question){ this.pending = ''; clearTimeout(this.timer); return; }
+
+    // The question goes into the box as it is heard, not only when it is sent,
+    // so what the machine thinks it heard is visible while it is still being
+    // said rather than only afterwards.
+    const box = this.overlay && this.overlay.querySelector('[data-q]');
+    if(box) box.value = question;
+
+    // The clock restarts only when the WORDS change, not on every event.
+    //
+    // This is what stopped questions ever being sent. An open microphone
+    // produces results continuously — a fan, a room, a breath, all of it
+    // arrives as interim results — and clearing the timer on each one meant
+    // the two seconds of silence could never elapse while the microphone was
+    // on at all. The pause being waited for is a pause in the SPEECH, and the
+    // only evidence of that is the transcript standing still.
+    if(question === this.pending) return;
+    this.pending = question;
     clearTimeout(this.timer);
-    if(!question) return;
-    this.timer = setTimeout(()=> this.submit(question), TB_VOICE_GAP_MS);
+    this.timer = setTimeout(()=> this.submit(), TB_VOICE_GAP_MS);
   },
 
   /** Type it in and press Ask. Nothing here knows what a question means. */
   submit(question){
     const o = this.overlay;
+    const q = (question || this.pending || '').trim();
     this.reset();
-    if(!o || !this.on) return;
+    if(!o || !this.on || !q) return;
     const box = o.querySelector('[data-q]');
     const form = o.querySelector('[data-ask]');
     if(!box || !form) return;
-    box.value = question;
+    box.value = q;
+    // The beep is the whole of the feedback that the pause was long enough and
+    // the question is on its way — the answer takes a moment to arrive, and
+    // until it does there is otherwise nothing to say it was heard.
+    tobbyVoiceBeep();
     try{ form.requestSubmit(); }
     catch(e){ form.onsubmit && form.onsubmit(new Event('submit', {cancelable:true})); }
     // The panel has just been rebuilt around us; re-bind to the new button and
