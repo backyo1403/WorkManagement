@@ -71,7 +71,7 @@ const TOOLS: Tool[] = [
   { key: 'h1', label: 'H1', title: 'Tiêu đề 1', block: 'H1', prefix: '# ' },
   { key: 'h2', label: 'H2', title: 'Tiêu đề 2', block: 'H2', prefix: '## ' },
   { key: 'h3', label: 'H3', title: 'Tiêu đề 3', block: 'H3', prefix: '### ' },
-  { key: 'ul', label: '•', title: 'Danh sách', cmd: 'insertUnorderedList', prefix: '- ' },
+  { key: 'ul', label: '•', title: 'Danh sách gạch đầu dòng', cmd: 'insertUnorderedList', prefix: '- ' },
   { key: 'ol', label: '1.', title: 'Danh sách đánh số', cmd: 'insertOrderedList', prefix: '1. ' },
   { key: 'task', icon: 'check', title: 'Checklist', task: true, prefix: '- [ ] ' },
   { key: 'quote', label: '❝', title: 'Trích dẫn', block: 'BLOCKQUOTE', prefix: '> ' },

@@ -155,14 +155,19 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     void (async () => {
       try {
         const res = await fetch('/api/archive-sweep', { method: 'POST' });
-        const body = (await res.json()) as { archived: number; tasks: TaskDTO[] };
-        if (body.archived > 0) {
+        const body = (await res.json()) as {
+          archived: number;
+          eventsClosed: number;
+          tasks: TaskDTO[];
+        };
+        if (body.tasks.length) {
           setData((d) => ({
             ...d,
             tasks: body.tasks.reduce((acc, t) => upsert(acc, t), d.tasks),
           }));
-          toast(`Đã lưu trữ ${body.archived} nhiệm vụ hoàn thành cũ`);
         }
+        if (body.eventsClosed > 0) toast(`Đã khép ${body.eventsClosed} sự kiện đã qua`);
+        if (body.archived > 0) toast(`Đã lưu trữ ${body.archived} nhiệm vụ hoàn thành cũ`);
       } catch {
         // A failed sweep is harmless — nothing is hidden, so stay quiet.
       }

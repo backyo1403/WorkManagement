@@ -360,6 +360,9 @@ a{color:inherit;}
 .status-Dang-lam{background:#FDF3D0; color:#8A6100;}
 :root[data-theme="dark"] .status-Dang-lam{background:rgba(243,196,53,.20); color:#F3C435;}
 .status-Hoan-thanh{background:var(--success-soft); color:var(--success);}
+/* Events read as scheduled, not as work in flight — hence purple rather than
+   the amber/green the doing-and-done pair uses. */
+.status-Su-kien{background:var(--purple-soft); color:var(--purple);}
 
 .hover-card{display:none; position:absolute; left:0; top:100%; margin-top:6px; width:230px; background:var(--surface); border:1px solid var(--border); border-radius:12px; box-shadow:var(--shadow-lg); padding:12px; z-index:40; cursor:default; max-height:min(340px, 70vh); overflow-y:auto;}
 /* flipped variants keep the card on-screen near the viewport edges */
@@ -374,7 +377,7 @@ a{color:inherit;}
 .hover-sub-check.done{background:var(--success); border-color:var(--success);}
 
 /* ---------- Kanban ---------- */
-.kanban-wrap{display:grid; grid-template-columns:repeat(3,1fr); gap:16px; align-items:start;}
+.kanban-wrap{display:grid; grid-template-columns:repeat(4,1fr); gap:16px; align-items:start;}
 .kanban-col{background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius); padding:12px; min-height:200px;}
 .kanban-col-head{display:flex; align-items:center; gap:8px; padding:4px 6px 12px 6px; font-weight:700; font-size:13px;}
 .kanban-col-count{margin-left:auto; background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:2px 9px; font-size:11.5px; color:var(--text-2);}
@@ -1200,3 +1203,602 @@ a{color:inherit;}
   .sidebar{height:54px;}
   .main{padding-bottom:70px;}
 }
+
+/* =========================================================
+   MOBILE SHELL  (iPhone, dark only)
+   Everything below is scoped to `.m-root`, the phone layout
+   MobileShell mounts under 700px in place of `.sidebar`.
+
+   The token block re-states the `:root[data-theme="dark"]`
+   values with no group tint: the phone build is dark-only and
+   keeps one neutral palette, so the active group shows as an
+   accent dot rather than repainting every surface. Scoping the
+   tokens here instead of forcing `data-theme` on <html> leaves
+   the stored theme alone for the desktop view.
+   ========================================================= */
+.m-root{
+  --bg:#0A0C12; --surface:#14171F; --surface-2:#0F1218; --surface-3:#1C2029;
+  --border:#242935; --border-strong:#333A49;
+  --text:#EDF0F7; --text-2:#98A1B8; --text-3:#646C82;
+  --brand:#6C93FF; --brand-soft:rgba(108,147,255,.15); --brand-dark:#8FAFFF; --on-brand:#0A0C12;
+  --purple:#A98BFF; --purple-soft:rgba(169,139,255,.16);
+  --pink:#F27BB0; --pink-soft:rgba(242,123,176,.16);
+  --sky:#48C4F8; --sky-soft:rgba(72,196,248,.16);
+  --danger:#F0705F; --danger-soft:rgba(240,112,95,.17);
+  --warning:#F3B23F; --warning-soft:rgba(243,178,63,.17);
+  --success:#3FCB86; --success-soft:rgba(63,203,134,.17);
+  /* group accents, lifted from the dark group blocks above */
+  --g-work:#17A085; --g-sport:#8B7BFF; --g-life:#2FB3B3;
+
+  position:fixed; inset:0; z-index:5;
+  display:flex; flex-direction:column;
+  background:var(--bg); color:var(--text);
+  font-family:-apple-system,"SF Pro Text",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+}
+.m-root *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+.m-root button{font-family:inherit; color:inherit; cursor:pointer;}
+.m-root input,.m-root textarea{
+  font-family:inherit; color:inherit; background:none; border:none; outline:none;
+}
+.m-root input::placeholder,.m-root textarea::placeholder{color:var(--text-3);}
+/* Scrollbars are chrome the phone frame does not have. */
+.m-scroller{scrollbar-width:none; -ms-overflow-style:none;}
+.m-scroller::-webkit-scrollbar{width:0; height:0;}
+
+/* ---------- header ---------- */
+.m-header{
+  flex-shrink:0; background:var(--bg);
+  padding:max(54px, env(safe-area-inset-top,0px)) 16px 0;
+  display:flex; flex-direction:column; gap:12px;
+}
+.m-header-row{height:44px; display:flex; align-items:center; gap:10px;}
+.m-title{
+  flex:1; min-width:0; font-size:22px; font-weight:700; letter-spacing:-.4px;
+  line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.m-group-chip{
+  flex-shrink:0; height:34px; display:flex; align-items:center; gap:6px;
+  padding:0 11px; border-radius:17px; background:var(--surface);
+  border:1px solid var(--border); font-size:13px; font-weight:650;
+}
+.m-dot{width:7px; height:7px; border-radius:4px; flex-shrink:0; display:block;}
+.m-avatar-btn{
+  flex-shrink:0; width:34px; height:34px; border-radius:17px;
+  background:var(--surface-3); border:1px solid var(--border);
+  color:var(--text); font-size:13px; font-weight:700;
+  display:flex; align-items:center; justify-content:center; overflow:hidden;
+}
+.m-avatar-btn img{width:100%; height:100%; object-fit:cover;}
+.m-back-btn{
+  flex-shrink:0; width:34px; height:34px; border-radius:17px;
+  background:var(--surface-3); border:1px solid var(--border);
+  color:var(--text-2); display:flex; align-items:center; justify-content:center;
+}
+
+/* ---------- segmented control ---------- */
+.m-seg{display:flex; gap:4px; padding:3px; background:var(--surface);
+  border:1px solid var(--border); border-radius:12px;}
+.m-seg button{
+  flex:1; height:34px; border:none; border-radius:9px; background:none;
+  color:var(--text-2); font-size:14px; font-weight:600;
+}
+.m-seg button.on{background:var(--surface-3); color:var(--text);}
+.m-seg.tall button{height:38px; font-size:13.5px; font-weight:650;}
+.m-seg.sunken{background:var(--surface-2);}
+
+/* ---------- content ---------- */
+.m-content{flex:1; min-height:0; overflow-y:auto; overflow-x:hidden;
+  -webkit-overflow-scrolling:touch;}
+.m-page{display:flex; flex-direction:column; padding-bottom:120px;}
+.m-pad{padding-left:16px; padding-right:16px;}
+.m-col{display:flex; flex-direction:column;}
+.m-empty{padding:48px 24px; text-align:center; font-size:14px; color:var(--text-3);}
+
+/* ---------- tab bar ---------- */
+.m-tabbar{
+  position:absolute; left:0; right:0; bottom:0;
+  height:calc(49px + max(34px, env(safe-area-inset-bottom,0px)));
+  background:rgba(15,18,24,.92); backdrop-filter:blur(20px);
+  -webkit-backdrop-filter:blur(20px); border-top:1px solid var(--border);
+  display:grid; grid-template-columns:repeat(5,1fr); align-items:start;
+  padding-top:7px; z-index:10;
+}
+.m-tab{
+  height:46px; background:none; border:none; padding:0;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:4px; color:var(--text-3);
+}
+.m-tab span{font-size:10.5px; font-weight:500; letter-spacing:-.1px;}
+.m-tab.on{color:var(--brand);}
+.m-tab.on span{font-weight:700;}
+/* Tobby's cell is the same 46px box as the other four, and his canvas is
+   centred in it — overflowing 6px above and below rather than riding 12px high,
+   so his middle sits on the same line as the icon-and-label stacks beside him.
+   `overflow:visible` is what lets him spill past the box without being cut. */
+.m-tab-tobby{
+  height:46px; background:none; border:none; padding:0; overflow:visible;
+  display:flex; align-items:center; justify-content:center;
+}
+.m-tobby{display:block; width:58px; height:58px;}
+.m-tobby canvas{display:block; width:100%; height:100%;}
+.m-tobby-fallback{
+  display:flex; align-items:center; justify-content:center; width:100%; height:100%;
+  font-size:9px; font-weight:800; letter-spacing:.4px; color:var(--brand);
+}
+
+/* ---------- pills, badges, avatars ---------- */
+.m-pri{font-size:10.5px; font-weight:800; letter-spacing:.5px;
+  padding:4px 7px; border-radius:7px; white-space:nowrap;}
+.m-pri-ASAP{background:rgba(240,112,95,.22); color:var(--danger);}
+.m-pri-HIGH{background:rgba(240,112,95,.15); color:var(--danger);}
+.m-pri-MEDIUM{background:var(--warning-soft); color:var(--warning);}
+.m-pri-LOW{background:var(--surface-3); color:var(--text-2);}
+.m-proj-badge{
+  font-size:11.5px; font-weight:650; padding:4px 8px; border-radius:7px;
+  max-width:150px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.m-due{font-size:11.5px; font-weight:700; padding:4px 8px; border-radius:7px;
+  white-space:nowrap; flex-shrink:0;}
+.m-due.push{margin-left:auto;}
+.m-tagpill{font-size:12px; font-weight:650; padding:5px 9px; border-radius:8px;
+  background:var(--surface-3); color:var(--text-2);}
+.m-tagpill.on{background:var(--brand-soft); color:var(--brand);}
+.m-initials{
+  width:26px; height:26px; border-radius:13px; background:var(--surface-3);
+  border:1px solid var(--border); font-size:10.5px; font-weight:700;
+  color:var(--text-2); display:flex; align-items:center; justify-content:center;
+  flex-shrink:0; overflow:hidden;
+}
+.m-initials img{width:100%; height:100%; object-fit:cover;}
+.m-bar{flex:1; height:5px; border-radius:3px; background:var(--surface-3); overflow:hidden;}
+.m-bar>i{display:block; height:100%; border-radius:3px; background:var(--brand);}
+.m-num{font-variant-numeric:tabular-nums;}
+
+/* ---------- login ---------- */
+.m-login{
+  flex:1; display:flex; flex-direction:column; justify-content:center; gap:28px;
+  padding:max(54px, env(safe-area-inset-top,0px)) 24px 60px;
+}
+.m-login-brand{display:flex; flex-direction:column; gap:14px; align-items:center;}
+.m-login-mark{
+  width:56px; height:56px; border-radius:16px; background:var(--surface-3);
+  border:1px solid var(--border); display:flex; align-items:center;
+  justify-content:center; font-size:26px;
+}
+.m-login-name{font-size:26px; font-weight:700; letter-spacing:2px; line-height:1.15;
+  text-align:center; text-transform:uppercase;}
+.m-login-fields{display:flex; flex-direction:column; gap:12px;}
+.m-field{display:flex; flex-direction:column; gap:7px;}
+.m-field>label{font-size:12px; font-weight:600; color:var(--text-3);
+  letter-spacing:.4px; text-transform:uppercase;}
+.m-input{
+  height:50px; border-radius:14px; background:var(--surface);
+  border:1px solid var(--border); display:flex; align-items:center; gap:10px;
+  padding:0 16px;
+}
+.m-input input{width:100%; font-size:17px;}
+.m-input>button{background:none; border:none; padding:0; color:var(--text-3);
+  display:flex; flex-shrink:0;}
+.m-cta{
+  height:52px; border:none; border-radius:14px; background:var(--brand);
+  color:var(--on-brand); font-size:17px; font-weight:650;
+}
+.m-cta[disabled]{opacity:.55;}
+.m-login-error{font-size:13.5px; color:var(--danger); text-align:center;}
+
+/* ---------- dashboard ---------- */
+.m-dash{gap:20px; padding-top:14px;}
+.m-hello{font-size:17px; font-weight:650;}
+.m-hello-sub{font-size:14px; color:var(--text-2);}
+.m-stats{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+.m-stat{
+  background:var(--surface); border:1px solid var(--border); border-radius:16px;
+  padding:14px; display:flex; flex-direction:column; gap:6px; min-height:88px;
+  text-align:left; width:100%;
+}
+.m-stat-label{font-size:12px; font-weight:600; color:var(--text-2);
+  letter-spacing:.3px; text-transform:uppercase;}
+.m-stat-value{font-size:28px; font-weight:700; letter-spacing:-1px; line-height:1;}
+.m-stat-sub{font-size:12px; color:var(--text-3);}
+.m-sec-head{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+.m-sec-title{font-size:16px; font-weight:650;}
+.m-link{background:none; border:none; padding:0; color:var(--brand);
+  font-size:14px; font-weight:600;}
+.m-list-card{
+  background:var(--surface); border:1px solid var(--border); border-radius:16px;
+  overflow:hidden; display:flex; flex-direction:column;
+}
+.m-agenda-row{
+  display:flex; align-items:center; gap:12px; min-height:56px; padding:11px 14px;
+  background:none; border:none; border-top:1px solid var(--border);
+  text-align:left; width:100%;
+}
+.m-agenda-row:first-child{border-top-color:transparent;}
+.m-agenda-time{width:46px; flex-shrink:0; font-size:14px; font-weight:700;
+  color:var(--brand);}
+.m-agenda-vein{width:3px; height:30px; border-radius:2px; flex-shrink:0;}
+.m-agenda-body{flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;}
+.m-agenda-title{font-size:15px; font-weight:550; color:var(--text);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.m-agenda-meta{font-size:12.5px; color:var(--text-2);}
+.m-attention-row{
+  display:flex; align-items:center; gap:10px; background:var(--surface);
+  border:1px solid var(--border); border-radius:14px; padding:12px 14px;
+  min-height:60px; text-align:left; width:100%;
+}
+.m-attention-body{flex:1; min-width:0; display:flex; flex-direction:column; gap:4px;}
+.m-attention-title{font-size:15px; font-weight:550; line-height:1.3;}
+.m-attention-sub{font-size:12.5px; color:var(--text-2);}
+
+/* ---------- tasks ---------- */
+.m-search{
+  height:44px; border-radius:14px; background:var(--surface);
+  border:1px solid var(--border); display:flex; align-items:center; gap:9px;
+  padding:0 13px; color:var(--text-3);
+}
+.m-search input{width:100%; font-size:16px; color:var(--text);}
+.m-chips{display:flex; gap:8px; overflow-x:auto; padding:0 16px;}
+.m-chip{
+  flex:none; height:36px; padding:0 14px; border-radius:18px;
+  background:var(--surface); border:1px solid var(--border); color:var(--text-2);
+  font-size:13.5px; font-weight:600; white-space:nowrap;
+  display:flex; align-items:center; gap:7px;
+}
+.m-chip.on{background:var(--brand-soft); border-color:rgba(108,147,255,.45); color:var(--brand);}
+.m-meta-row{display:flex; align-items:center; justify-content:space-between;}
+.m-meta-left{font-size:13px; color:var(--text-3);}
+.m-meta-right{display:flex; align-items:center; gap:6px; font-size:13px;
+  color:var(--text-2); background:none; border:none; padding:0;}
+.m-task-card{
+  display:flex; flex-direction:column; gap:9px; background:var(--surface);
+  border:1px solid var(--border); border-radius:16px; padding:13px 14px;
+  text-align:left; width:100%;
+}
+.m-task-top{display:flex; align-items:center; gap:8px;}
+.m-task-title{font-size:16px; font-weight:600; line-height:1.35;}
+.m-task-foot{display:flex; align-items:center; gap:10px;}
+.m-task-pct{font-size:12px; font-weight:650; color:var(--text-2);}
+
+/* ---------- kanban ---------- */
+.m-kb-scroll{display:flex; gap:12px; overflow-x:auto; padding:0 16px;
+  scroll-snap-type:x mandatory;}
+.m-kb-col{flex:none; width:370px; max-width:calc(100vw - 32px);
+  scroll-snap-align:center; display:flex; flex-direction:column; gap:10px;}
+.m-kb-head{display:flex; align-items:center; gap:8px; padding:0 2px;}
+.m-kb-name{font-size:15px; font-weight:700;}
+.m-kb-count{font-size:12px; font-weight:700; color:var(--text-2);
+  background:var(--surface-3); border-radius:9px; padding:3px 8px;}
+.m-kb-card{
+  display:flex; flex-direction:column; gap:9px; background:var(--surface);
+  border:1px solid var(--border); border-radius:14px; padding:12px 13px;
+  text-align:left; width:100%;
+}
+.m-kb-title{font-size:15px; font-weight:600; line-height:1.35;}
+.m-kb-proj{font-size:11.5px; font-weight:650; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis;}
+.m-dots{display:flex; justify-content:center; gap:6px; padding-top:2px;}
+.m-dots i{width:5px; height:5px; border-radius:3px; background:var(--border-strong);
+  transition:width .18s ease;}
+.m-dots i.on{width:22px; background:var(--brand);}
+.m-hint{font-size:12.5px; color:var(--text-3); text-align:center; padding:0 24px;}
+
+/* ---------- timetable ---------- */
+.m-week{display:flex; align-items:center; gap:8px;}
+.m-day{
+  flex:1; min-width:0; height:62px; border-radius:14px; background:var(--surface);
+  border:1px solid var(--border); display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:3px; padding:0;
+}
+.m-day.on{background:var(--brand); border-color:var(--brand);}
+.m-day-dow{font-size:11px; font-weight:600; color:var(--text-3);}
+.m-day-num{font-size:17px; font-weight:700; color:var(--text);}
+.m-day.on .m-day-dow,.m-day.on .m-day-num{color:var(--on-brand);}
+.m-hour{display:flex; gap:10px; min-height:56px; border-top:1px solid var(--surface-3);
+  padding:8px 0;}
+.m-hour-label{width:42px; flex-shrink:0; font-size:12.5px; font-weight:650;
+  color:var(--text-3); padding-top:2px;}
+.m-hour-body{flex:1; min-width:0; display:flex; flex-direction:column; gap:6px;}
+.m-block{
+  border-radius:12px; padding:9px 11px; display:flex; flex-direction:column; gap:3px;
+  text-align:left; width:100%; border:none; border-left:3px solid var(--brand);
+}
+.m-block-title{font-size:14.5px; font-weight:600; color:var(--text); line-height:1.3;}
+.m-block-meta{font-size:12px; color:var(--text-2);}
+
+/* ---------- calendar ---------- */
+.m-cal-head{display:flex; align-items:center; justify-content:space-between;}
+.m-cal-month{font-size:17px; font-weight:700;}
+.m-icon-btn{
+  width:36px; height:36px; border-radius:12px; background:var(--surface);
+  border:1px solid var(--border); color:var(--text-2);
+  display:flex; align-items:center; justify-content:center;
+}
+.m-cal-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:4px;}
+.m-cal-dow{height:22px; display:flex; align-items:center; justify-content:center;
+  font-size:11.5px; font-weight:700; color:var(--text-3);}
+.m-cal-cell{
+  height:46px; border-radius:12px; background:var(--surface);
+  border:1px solid var(--border); display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:3px; padding:0;
+}
+.m-cal-cell.out{background:transparent; border-color:transparent;}
+.m-cal-cell.on{background:var(--brand); border-color:var(--brand);}
+.m-cal-day{font-size:14.5px; font-weight:600; color:var(--text); line-height:1;
+  font-variant-numeric:tabular-nums;}
+.m-cal-cell.out .m-cal-day{color:var(--text-3); font-weight:500;}
+.m-cal-cell.on .m-cal-day{color:var(--on-brand); font-weight:750;}
+.m-cal-dots{display:flex; gap:2px; height:4px; align-items:center;}
+.m-cal-dots i{width:4px; height:4px; border-radius:2px;}
+
+/* ---------- notes ---------- */
+.m-note-card{
+  display:flex; flex-direction:column; gap:7px; background:var(--surface);
+  border:1px solid var(--border); border-radius:16px; padding:14px;
+  text-align:left; width:100%;
+}
+.m-note-head{display:flex; align-items:center; gap:8px;}
+.m-note-title{flex:1; min-width:0; font-size:16px; font-weight:650;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.m-note-when{font-size:12px; color:var(--text-3); flex-shrink:0;}
+.m-note-snip{font-size:14px; color:var(--text-2); line-height:1.45;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;}
+.m-note-foot{display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
+.m-note-link{margin-left:auto; font-size:11.5px; font-weight:650; color:var(--brand);}
+.m-smallpill{font-size:11.5px; font-weight:650; padding:4px 8px; border-radius:7px;
+  background:var(--surface-3); color:var(--text-2);}
+
+/* ---------- note editor ---------- */
+.m-tools{display:flex; gap:6px; overflow-x:auto; padding:0 16px;}
+.m-tool{
+  flex:none; width:40px; height:40px; border-radius:12px; background:var(--surface);
+  border:1px solid var(--border); color:var(--text); font-size:15px; font-weight:600;
+}
+.m-tool.on{background:var(--brand-soft); border-color:rgba(108,147,255,.45); color:var(--brand);}
+.m-note-input{width:100%; font-size:20px; font-weight:700; letter-spacing:-.3px;
+  line-height:1.3;}
+/* Also lands on the `.md-rich` WYSIWYG surface, whose desktop padding and
+   420px floor are far too big for a phone. */
+.m-note-body{width:100%; min-height:120px; padding:0; font-size:15px;
+  line-height:1.6; resize:none; outline:none;}
+/* Raw Markdown needs room: the rendered body wraps to its content, but a
+   textarea does not, and 120px of source is four lines and a scrollbar. */
+.m-note-body.raw{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:13.5px; min-height:340px;}
+/* The note's own `- [ ]` lines are the checklist, so the boxes drawn inside the
+   body have to be a real tap target and carry the phone's accent, not the 17px
+   desktop tick. */
+.m-root li.md-task{min-height:44px; align-items:center;}
+.m-root .md-checkbox{width:22px; height:22px; margin-top:0; border-radius:7px;
+  border-width:1.5px; font-size:14px; font-weight:800;}
+.m-root .md-checkbox.done{background:var(--brand); border-color:var(--brand);
+  color:var(--on-brand);}
+.m-box{
+  width:22px; height:22px; border-radius:7px; background:none;
+  border:1.5px solid var(--border-strong); flex-shrink:0; padding:0;
+  display:flex; align-items:center; justify-content:center; color:var(--on-brand);
+}
+.m-box.on{background:var(--brand); border-color:var(--brand);}
+.m-box.add{border-style:dashed; color:var(--text-3); font-size:14px;}
+.m-add-check{display:flex; align-items:center; gap:11px; min-height:44px;
+  background:none; border:none; padding:0; font-size:15px; color:var(--text-3);}
+.m-panel{
+  background:var(--surface-2); border:1px solid var(--border); border-radius:14px;
+  padding:13px; display:flex; flex-direction:column; gap:10px;
+}
+.m-panel-label{font-size:12px; font-weight:700; letter-spacing:.5px;
+  text-transform:uppercase; color:var(--text-3);}
+.m-panel-row{display:flex; align-items:center; gap:10px; background:none;
+  border:none; padding:0; width:100%; text-align:left;}
+.m-panel-name{flex:1; min-width:0; font-size:14.5px; font-weight:550;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.m-panel-state{font-size:11.5px; font-weight:700; flex-shrink:0;}
+.m-soft-btn{
+  height:40px; border-radius:11px; background:var(--brand-soft); border:none;
+  color:var(--brand); font-size:14px; font-weight:650;
+}
+.m-foot-note{font-size:12.5px; color:var(--text-3);}
+
+/* ---------- projects ---------- */
+.m-proj-card{
+  background:var(--surface); border:1px solid var(--border); border-radius:16px;
+  padding:14px; display:flex; flex-direction:column; gap:11px;
+}
+.m-proj-head{display:flex; align-items:center; gap:11px;}
+.m-proj-icon{width:38px; height:38px; border-radius:12px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;}
+.m-proj-name{font-size:16px; font-weight:650; line-height:1.3;}
+.m-proj-desc{font-size:12.5px; color:var(--text-2); line-height:1.35;}
+.m-proj-group{font-size:10.5px; font-weight:700; padding:3px 6px; border-radius:6px;
+  flex-shrink:0;}
+.m-proj-facts{display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  font-size:12px; color:var(--text-2);}
+.m-proj-owner{color:var(--text-3);}
+.m-proj-goal{font-size:12.5px; color:var(--text-2); line-height:1.4;}
+.m-proj-pct{font-size:12.5px; font-weight:700; color:var(--text-2);}
+.m-status-pill{font-size:11.5px; font-weight:650; padding:5px 9px; border-radius:8px;}
+
+/* ---------- settings ---------- */
+.m-settings{gap:22px; padding-top:8px;}
+.m-set-group{display:flex; flex-direction:column; gap:8px;}
+.m-set-label{padding:0 20px; font-size:12px; font-weight:700; letter-spacing:.6px;
+  text-transform:uppercase; color:var(--text-3);}
+.m-inset{
+  margin:0 16px; background:var(--surface); border:1px solid var(--border);
+  border-radius:16px; overflow:hidden; display:flex; flex-direction:column;
+}
+.m-row{
+  display:flex; align-items:center; gap:12px; min-height:52px; padding:10px 14px;
+  border:none; border-top:1px solid var(--border); background:none;
+  text-align:left; width:100%;
+}
+.m-row:first-child{border-top-color:transparent;}
+.m-row-body{flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;}
+.m-row-title{font-size:15.5px; font-weight:550; color:var(--text);}
+.m-row-title.danger{color:var(--danger);}
+.m-row-sub{font-size:12.5px; color:var(--text-3); line-height:1.35;}
+.m-row-value{display:flex; align-items:center; gap:6px; flex-shrink:0;
+  font-size:15px; color:var(--text-2); max-width:46%;}
+.m-row-value>span{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.m-row-input{flex-shrink:0; width:140px; text-align:right; font-size:15px;
+  color:var(--text-2);}
+.m-switch{
+  width:50px; height:31px; border-radius:16px; background:var(--surface-3);
+  border:none; padding:2px; display:flex; justify-content:flex-start; flex-shrink:0;
+}
+.m-switch.on{background:var(--brand); justify-content:flex-end;}
+.m-switch i{width:27px; height:27px; border-radius:14px; background:#fff; display:block;}
+
+/* ---------- sheets ---------- */
+.m-overlay{
+  position:absolute; inset:0; background:rgba(4,6,10,.62); z-index:20;
+  display:flex; flex-direction:column; justify-content:flex-end;
+}
+.m-dismiss{flex:1; background:none; border:none;}
+.m-sheet{
+  background:var(--surface); border-top:1px solid var(--border-strong);
+  border-radius:24px 24px 0 0; max-height:min(760px, 90%);
+  display:flex; flex-direction:column; overflow:hidden;
+}
+.m-sheet.tall{max-height:min(790px, 94%);}
+.m-grip{padding:10px 0 4px; display:flex; justify-content:center; flex-shrink:0;}
+.m-grip i{width:40px; height:5px; border-radius:3px; background:var(--border-strong);}
+.m-sheet-body{
+  flex:1; min-height:0; overflow-y:auto;
+  padding:8px 16px calc(40px + env(safe-area-inset-bottom,0px));
+  display:flex; flex-direction:column; gap:16px;
+}
+/* A scrolling flex column shrinks its children before it agrees to scroll, so
+   an open accordion was losing its last option to `overflow:hidden`. Nothing in
+   a sheet is allowed to compress — the sheet scrolls instead. */
+.m-sheet-body > *{flex-shrink:0;}
+.m-sheet-body.compose{padding-top:12px; gap:12px;}
+.m-sheet-head{display:flex; align-items:flex-start; gap:10px;}
+.m-sheet-heading{flex:1; min-width:0; display:flex; flex-direction:column; gap:8px;}
+.m-sheet-title{font-size:21px; font-weight:700; line-height:1.25; letter-spacing:-.3px;}
+.m-close{
+  width:34px; height:34px; border-radius:17px; background:var(--surface-3);
+  border:1px solid var(--border); color:var(--text-2); flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+}
+.m-meta-table{
+  background:var(--surface-2); border:1px solid var(--border); border-radius:14px;
+  overflow:hidden; display:flex; flex-direction:column;
+}
+.m-meta-line{display:flex; align-items:center; gap:12px; min-height:46px;
+  padding:9px 13px; border-top:1px solid var(--border);}
+.m-meta-line:first-child{border-top-color:transparent;}
+.m-meta-key{width:104px; flex-shrink:0; font-size:13px; color:var(--text-3);}
+.m-meta-val{flex:1; font-size:14.5px; font-weight:550; text-align:right;}
+.m-progress8{flex:1; height:8px; border-radius:4px; background:var(--surface-3);
+  overflow:hidden;}
+.m-progress8>i{display:block; height:100%; border-radius:4px; background:var(--brand);}
+.m-sub-row{border-top:1px solid var(--border);}
+.m-sub-row:first-child{border-top-color:transparent;}
+.m-sub-row.editing{background:rgba(108,147,255,.06);}
+.m-sub-line{display:flex; align-items:center; gap:11px; min-height:48px; padding:8px 13px;}
+.m-sub-text{flex:1; min-width:0; font-size:14.5px; line-height:1.4;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.m-sub-text.done{color:var(--text-3); text-decoration:line-through;}
+.m-sub-due{font-size:12px; color:var(--text-3); flex-shrink:0;}
+.m-mini-btn{
+  width:32px; height:32px; border-radius:10px; background:var(--surface-3);
+  border:1px solid var(--border); color:var(--text-2); flex-shrink:0; padding:0;
+  display:flex; align-items:center; justify-content:center;
+}
+.m-mini-btn.on{color:var(--brand);}
+.m-sub-edit{padding:0 13px 12px; display:flex; flex-direction:column; gap:8px;}
+.m-edit-box{
+  min-height:46px; border-radius:12px; background:var(--surface);
+  border:1px solid var(--border-strong); display:flex; align-items:center; gap:9px;
+  padding:0 12px; color:var(--text-3);
+}
+.m-edit-box input{width:100%; font-size:14.5px; color:var(--text);}
+.m-done-btn{height:46px; padding:0 18px; border-radius:12px; background:var(--brand);
+  border:none; color:var(--on-brand); font-size:14.5px; font-weight:650; flex-shrink:0;}
+.m-sheet-actions{display:flex; gap:10px;}
+.m-save-btn{flex:1; height:48px; border-radius:14px; background:var(--brand);
+  border:none; color:var(--on-brand); font-size:16px; font-weight:650;}
+.m-del-btn{
+  width:48px; height:48px; border-radius:14px; background:var(--danger-soft);
+  border:none; color:var(--danger); display:flex; align-items:center;
+  justify-content:center; flex-shrink:0;
+}
+
+/* ---------- compose sheet: accordion + date wheels ---------- */
+.m-compose-title{font-size:19px; font-weight:700;}
+.m-compose-input{
+  min-height:52px; border-radius:14px; background:var(--surface-2);
+  border:1px solid var(--border); display:flex; align-items:center; padding:0 14px;
+}
+.m-compose-input input{width:100%; font-size:16px; font-weight:550;}
+.m-acc{border-radius:14px; background:var(--surface-2); border:1px solid var(--border);
+  overflow:hidden;}
+.m-acc.open{background:var(--surface-3); border-color:var(--border-strong);}
+.m-acc-head{
+  width:100%; min-height:52px; display:flex; align-items:center; gap:10px;
+  padding:0 14px; background:none; border:none;
+}
+.m-acc-label{font-size:13.5px; color:var(--text-2); flex-shrink:0;}
+.m-acc-value{
+  flex:1; min-width:0; text-align:right; font-size:15px; font-weight:600;
+  color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.m-acc.open .m-acc-value{color:var(--brand);}
+.m-acc-caret{flex-shrink:0; color:var(--text-3); display:flex;}
+.m-acc.open .m-acc-caret{transform:rotate(180deg);}
+.m-acc-list{padding:2px 8px 10px; display:flex; flex-direction:column; gap:3px;}
+.m-opt{
+  min-height:44px; display:flex; align-items:center; gap:10px; padding:0 12px;
+  border-radius:11px; background:none; border:none; width:100%;
+}
+.m-opt.on{background:rgba(108,147,255,.10);}
+.m-opt-label{flex:1; text-align:left; font-size:15px; font-weight:500;
+  color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.m-opt.on .m-opt-label{font-weight:650; color:var(--text);}
+.m-wheels-wrap{padding:0 8px 10px; display:flex; flex-direction:column; gap:6px;}
+.m-wheel-heads{display:flex; gap:5px; padding:0 2px;}
+.m-wheel-heads span{flex:1; font-size:11px; font-weight:700; letter-spacing:.3px;
+  color:var(--text-3); text-align:center;}
+.m-wheel-heads span.year{flex:1.3;}
+.m-wheels{display:flex; gap:5px;}
+/* Positioned so each item's `offsetTop` is measured from the column, not from
+   the sheet — that is what centres the current value when a wheel opens. */
+.m-wheel{
+  position:relative;
+  flex:1; height:140px; overflow-y:auto; scroll-snap-type:y mandatory;
+  border-radius:11px; background:var(--surface); border:1px solid var(--border-strong);
+  display:flex; flex-direction:column;
+}
+.m-wheel.year{flex:1.3;}
+.m-wheel button{
+  min-height:44px; flex:none; scroll-snap-align:center; background:none; border:none;
+  color:var(--text-2); font-size:15px; font-weight:500; padding:0;
+  font-variant-numeric:tabular-nums;
+}
+.m-wheel button.on{background:rgba(108,147,255,.16); color:var(--brand); font-weight:700;}
+
+/* ---------- popovers ---------- */
+.m-pop-layer{position:absolute; inset:0; z-index:30;}
+.m-pop-scrim{position:absolute; inset:0; background:rgba(4,6,10,.4); border:none;}
+.m-pop{
+  position:absolute; top:104px; right:16px; background:var(--surface-3);
+  border:1px solid var(--border-strong); border-radius:16px;
+  box-shadow:0 12px 30px rgba(0,0,0,.55); overflow:hidden;
+  display:flex; flex-direction:column;
+}
+.m-pop.groups{width:216px;}
+.m-pop.more{width:230px;}
+.m-pop button{
+  display:flex; align-items:center; gap:11px; min-height:48px; padding:0 14px;
+  background:none; border:none; border-top:1px solid var(--border-strong); width:100%;
+}
+.m-pop button:first-child{border-top-color:transparent;}
+.m-pop button.on{background:rgba(108,147,255,.10);}
+.m-pop-label{flex:1; text-align:left; font-size:15.5px; font-weight:550;
+  color:var(--text-2);}
+.m-pop button.on .m-pop-label{font-weight:700; color:var(--text);}
+
+/* Toasts clear the tab bar rather than hiding behind it. */
+body:has(.m-root) .toast-wrap{bottom:calc(99px + env(safe-area-inset-bottom,0px));}

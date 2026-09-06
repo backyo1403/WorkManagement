@@ -6,12 +6,17 @@ import { usePathname } from 'next/navigation';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar } from '@/components/ui/primitives';
 import { LoginScreen } from './LoginScreen';
+import { MobileShell } from './MobileShell';
 import { QuickComposer } from './QuickComposer';
-import { isOverdue, isSameDay } from '@/lib/domain';
-import { WORK_GROUPS, type TaskDTO } from '@/lib/types';
+import { MobileLogin } from '@/components/mobile/MobileLogin';
+import { computeNotifications } from '@/lib/domain';
+import { WORK_GROUPS } from '@/lib/types';
 import { useAuth } from '@/state/AuthProvider';
 import { useData } from '@/state/DataProvider';
 import { usePrefs } from '@/state/PrefsProvider';
+
+/** Matches the `max-width:699px` block in globals.css — one breakpoint, not two. */
+const PHONE_QUERY = '(max-width: 699px)';
 
 const NAV_GROUPS = [
   { label: 'Tổng quan', items: [{ href: '/dashboard', ico: 'dashboard', label: 'Dashboard' }] },
@@ -49,20 +54,6 @@ const NAV_GROUPS = [
   },
 ];
 
-/** Overdue or due-today tasks in the active group, soonest first. */
-export function computeNotifications(tasks: TaskDTO[], group: string) {
-  return tasks
-    .filter((t) => !t.archived && t.status !== 'DONE' && (!group || t.groupKey === group))
-    .filter((t) => isOverdue(t) || isSameDay(t.deadline))
-    .map((t) => ({
-      id: t.id,
-      type: isOverdue(t) ? ('overdue' as const) : ('today' as const),
-      task: t,
-      at: t.deadline!,
-    }))
-    .sort((a, b) => +new Date(a.at) - +new Date(b.at));
-}
-
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, ready, logout } = useAuth();
   const { tasks, settings, loading } = useData();
@@ -71,6 +62,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const [arcOpen, setArcOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  /**
+   * `null` until the media query has been read. The server has no viewport, so
+   * committing to either layout during render would hydrate the wrong one and
+   * flash the desktop sidebar on a phone.
+   */
+  const [isPhone, setIsPhone] = useState<boolean | null>(null);
   const dockRef = useRef<HTMLDivElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
 
@@ -80,6 +77,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setArcOpen(false);
     setComposerOpen(false);
   };
+
+  /**
+   * Follows rotation and a resized window, not just the first paint.
+   *
+   * `resize` is watched alongside the media query because the query's `change`
+   * event does not fire under some viewport emulation (device toolbars, remote
+   * debugging), which would strand the desktop shell on a phone-width screen.
+   * Re-setting the same boolean is free — React bails out of the render.
+   */
+  useEffect(() => {
+    const mq = window.matchMedia(PHONE_QUERY);
+    const apply = () => setIsPhone(mq.matches);
+    apply();
+    mq.addEventListener('change', apply);
+    window.addEventListener('resize', apply);
+    return () => {
+      mq.removeEventListener('change', apply);
+      window.removeEventListener('resize', apply);
+    };
+  }, []);
 
   /**
    * Click anywhere outside, or Esc, dismisses the radial menu and composer.
@@ -108,7 +125,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [arcOpen, composerOpen]);
 
-  if (!ready || loading) {
+  if (!ready || loading || isPhone === null) {
     return (
       <div id="app">
         <div className="main">
@@ -120,7 +137,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!user) return <LoginScreen />;
+  if (!user) return isPhone ? <MobileLogin /> : <LoginScreen />;
+
+  /**
+   * The phone gets its own shell rather than a squeezed sidebar, and it renders
+   * its own screens instead of `children`: the routed pages are laid out for a
+   * desktop grid, and shrinking eleven columns into 402pt is what made the old
+   * mobile view unusable. Deep links still resolve — Next has already matched
+   * the route, the phone shell just draws its own view of the same data.
+   */
+  if (isPhone) return <MobileShell />;
 
   return (
     <>

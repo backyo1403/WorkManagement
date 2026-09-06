@@ -50,14 +50,25 @@ export function groupColor(key: string | null | undefined): string {
 
 // ─────────────────────────── task status ───────────────────────────
 
-export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE';
+/**
+ * `EVENT` is a status, not a fourth kind of record, so a meeting or a site
+ * inspection inherits the whole task machine — filters, kanban, search,
+ * projects, notifications — for free.
+ *
+ * What makes it different is how its two dates are read. On a plain task
+ * `start` is when you mean to begin and `deadline` is when it is due; on an
+ * event they are the two ends of the thing itself. `eventRange()` in
+ * `lib/domain.ts` is the one place that difference is spelled out.
+ */
+export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE' | 'EVENT';
 
-export const TASK_STATUSES: TaskStatus[] = ['TODO', 'IN_PROGRESS', 'DONE'];
+export const TASK_STATUSES: TaskStatus[] = ['TODO', 'IN_PROGRESS', 'DONE', 'EVENT'];
 
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   TODO: 'Cần làm',
   IN_PROGRESS: 'Đang làm',
   DONE: 'Hoàn thành',
+  EVENT: 'Sự kiện',
 };
 
 /** Class suffixes match the `.status-*` rules already in globals.css. */
@@ -65,6 +76,15 @@ export const TASK_STATUS_CLASS: Record<TaskStatus, string> = {
   TODO: 'status-Can-lam',
   IN_PROGRESS: 'status-Dang-lam',
   DONE: 'status-Hoan-thanh',
+  EVENT: 'status-Su-kien',
+};
+
+/** Accent each status carries wherever it is drawn as a dot or a column head. */
+export const TASK_STATUS_COLOR: Record<TaskStatus, string> = {
+  TODO: 'var(--text-3)',
+  IN_PROGRESS: 'var(--warning)',
+  DONE: 'var(--success)',
+  EVENT: 'var(--purple)',
 };
 
 export function isTaskStatus(v: unknown): v is TaskStatus {

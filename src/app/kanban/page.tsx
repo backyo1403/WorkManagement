@@ -25,6 +25,7 @@ const COLUMN_ICON: Record<TaskStatus, string> = {
   TODO: '⬜',
   IN_PROGRESS: '🟧',
   DONE: '✅',
+  EVENT: '🎀',
 };
 
 /** Buckets a task by deadline, falling back to its creation date. */

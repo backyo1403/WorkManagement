@@ -137,8 +137,58 @@ export function dayPart(): 'sáng' | 'chiều' | 'tối' {
 
 // ─────────────────────────── task derivations ───────────────────────────
 
+/**
+ * An event is never overdue: a meeting that has been and gone is not a job
+ * somebody failed to do, and colouring it red would make the board read as a
+ * backlog of things nobody did.
+ */
 export function isOverdue(t: Pick<TaskDTO, 'deadline' | 'status' | 'archived'>): boolean {
-  return !!t.deadline && new Date(t.deadline) < new Date() && t.status !== 'DONE' && !t.archived;
+  return (
+    !!t.deadline &&
+    new Date(t.deadline) < new Date() &&
+    t.status !== 'DONE' &&
+    t.status !== 'EVENT' &&
+    !t.archived
+  );
+}
+
+// ─────────────────────────── events ───────────────────────────
+
+export function isEvent(t: Pick<TaskDTO, 'status'> | null | undefined): boolean {
+  return t?.status === 'EVENT';
+}
+
+/**
+ * The span an event actually occupies.
+ *
+ * `start` and `deadline` are its two ends rather than "when I plan to begin"
+ * and "when it is due". When no end was given the estimate supplies one, so a
+ * half-filled event still draws something sane instead of nothing.
+ */
+export function eventRange(
+  t: Pick<TaskDTO, 'start' | 'deadline' | 'estimateHours'>,
+): { start: Date; end: Date } | null {
+  if (!t.start) return null;
+  const start = new Date(t.start);
+  if (Number.isNaN(start.getTime())) return null;
+
+  let end = t.deadline ? new Date(t.deadline) : null;
+  if (!end || Number.isNaN(end.getTime()) || end <= start) {
+    end = new Date(start.getTime() + Math.max(0.5, t.estimateHours || 1) * 3600000);
+  }
+  return { start, end };
+}
+
+/** Does this event touch `day` at all? A three-day trip covers all three. */
+export function eventCoversDay(
+  t: Pick<TaskDTO, 'start' | 'deadline' | 'estimateHours'>,
+  day: Date,
+): boolean {
+  const range = eventRange(t);
+  if (!range) return false;
+  const from = startOfDay(day);
+  const to = addDays(from, 1);
+  return range.start < to && range.end > from;
 }
 
 /**
@@ -173,6 +223,42 @@ export function dueBadgeStyle(deadline: string, status: TaskStatus) {
   const overdue = days < 0 && status !== 'DONE';
   const scale = dueScaleFor(overdue ? 0 : days);
   return { days, overdue, bg: scale.bg, fg: scale.fg };
+}
+
+// ─────────────────────────── notifications ───────────────────────────
+
+export interface Notification {
+  id: string;
+  type: 'overdue' | 'today';
+  task: TaskDTO;
+  at: string;
+}
+
+/**
+ * Overdue or due-today tasks in the active group, soonest first.
+ *
+ * Lives here rather than beside the sidebar that first needed it: four screens
+ * across both shells read it, and a plain function exported from a component
+ * file also costs Fast Refresh a full page reload on every edit.
+ */
+export function computeNotifications(tasks: TaskDTO[], group: string): Notification[] {
+  return tasks
+    .filter(
+      (t) =>
+        !t.archived &&
+        t.status !== 'DONE' &&
+        // An event is not work that can slip, so it never raises a warning.
+        !isEvent(t) &&
+        (!group || t.groupKey === group),
+    )
+    .filter((t) => isOverdue(t) || isSameDay(t.deadline))
+    .map((t) => ({
+      id: t.id,
+      type: isOverdue(t) ? ('overdue' as const) : ('today' as const),
+      task: t,
+      at: t.deadline!,
+    }))
+    .sort((a, b) => +new Date(a.at) - +new Date(b.at));
 }
 
 // ─────────────────────────── people ───────────────────────────

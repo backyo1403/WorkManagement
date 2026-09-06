@@ -159,7 +159,11 @@ export const DICT_EN: Record<string, string> = {
   'Vàng': 'Yellow', 'Lá': 'Green', 'Ngọc': 'Teal', 'Xanh': 'Blue',
   'Tím': 'Purple', 'Hồng': 'Pink', 'Xám': 'Grey',
   'Gạch ngang': 'Strikethrough', 'Tiêu đề 1': 'Heading 1', 'Tiêu đề 2': 'Heading 2',
-  'Tiêu đề 3': 'Heading 3', 'Danh sách': 'Bullet list', 'Danh sách đánh số': 'Numbered list',
+  // "Danh sách" on its own is the plain word, used by the phone's
+  // Danh sách | Tiến độ segmented control. The editor's bullet-list tooltip
+  // spells itself out so the two no longer share a key.
+  'Tiêu đề 3': 'Heading 3', 'Danh sách': 'List',
+  'Danh sách gạch đầu dòng': 'Bullet list', 'Danh sách đánh số': 'Numbered list',
   Checklist: 'Checklist', 'Trích dẫn': 'Quote', 'Khối mã': 'Code block',
   'Liên kết (Ctrl+K)': 'Link (Ctrl+K)', 'Đường kẻ ngang': 'Divider',
   'Đã lưu': 'Saved', 'Đang lưu…': 'Saving…', 'Chưa lưu…': 'Unsaved…',
@@ -209,8 +213,76 @@ export const DICT_EN: Record<string, string> = {
   'PIN không đúng': 'Wrong PIN',
   'Sổ tay đang khoá — mở khoá để xem nội dung': 'Locked notebook — unlock to read',
 
+  // ── phone shell ──
+  // Wording the mobile screens use that the desktop never needed. Same rule as
+  // everywhere else: the Vietnamese is the key, so an entry missing here shows
+  // Vietnamese in English rather than a broken label.
+  'Sự kiện': 'Event', 'Bắt đầu sự kiện': 'Event starts', 'Kết thúc sự kiện': 'Event ends',
+  'Quay lại': 'Back', 'Menu tài khoản': 'Account menu', 'Tất cả nhóm': 'All groups',
+  'Theo giờ': 'By hour', 'Nhóm': 'Group', 'Ước lượng': 'Estimate', 'Ngày mai': 'Tomorrow',
+  'Chào buổi sáng': 'Good morning', 'Chào buổi chiều': 'Good afternoon',
+  'Chào buổi tối': 'Good evening', 'bạn': 'you',
+
+  // dashboard cards
+  'trong 7 ngày': 'in the last 7 days', 'Cần chú ý': 'Needs attention',
+  'Không có sự kiện hôm nay': 'No events today',
+  'Chưa có mục nào đặt giờ cho hôm nay': 'Nothing scheduled for today',
+  'Không có nhiệm vụ nào sắp trễ hạn': 'Nothing is about to slip',
+
+  // task list
+  'Tìm nhiệm vụ, dự án, #tag': 'Search tasks, projects, #tag',
+  'Chưa xong': 'Open', 'Ưu tiên cao': 'High priority',
+  'Ưu tiên': 'Priority', 'Mới tạo': 'Newest', 'Tên': 'Name',
+  'Vuốt ngang để đổi cột · mở thẻ để chuyển trạng thái':
+    'Swipe sideways to change column · open a card to change its status',
+
+  // task sheet
+  'Tiến độ suy ra từ công việc con': 'Progress follows the subtasks',
+  'Chưa có công việc con': 'No subtasks yet', 'Nội dung công việc con': 'Subtask text',
+  'Sửa công việc con': 'Edit subtask', 'Tiêu đề không được để trống': 'A title is required',
+
+  // calendar ('Tháng trước' already lives in the kanban block above)
+  'Tháng sau': 'Next month',
+  'Không có hạn chót nào trong ngày này': 'Nothing due on this day',
+
+  // notes
+  'Chưa có ghi chú nào ở đây': 'No notes here yet', 'Ghi chú trống': 'Empty note',
+  'Chưa xếp sổ': 'No notebook', 'Không tìm thấy ghi chú': 'Note not found',
+  'Mã nguồn Markdown': 'Markdown source', 'Viết ghi chú…': 'Write a note…',
+  'Thêm mục checklist': 'Add checklist item', 'Tự lưu sau 500ms': 'Autosaves after 500ms',
+  'Vừa xong': 'Just now',
+
+  // notifications
+  'Không có thông báo nào': 'No notifications', 'Đã quá hạn': 'Overdue',
+
+  // compose sheet
+  'Việc cần làm…': 'What needs doing…', 'Tạo ghi chú': 'Create note',
+  'Tạo sự kiện': 'Create event', '— Chưa xếp sổ —': '— No notebook —',
+  'NGÀY': 'DAY', 'THÁNG': 'MONTH', 'NĂM': 'YEAR', 'GIỜ': 'HOUR', 'PHÚT': 'MIN',
+
+  // settings, one scrolling page
+  'Ngôn ngữ & giao diện': 'Language & appearance', 'Giao diện': 'Appearance', 'Tối': 'Dark',
+  'Bản điện thoại chỉ dùng giao diện tối': 'The phone build is dark only',
+  'Bảo mật': 'Security', 'Khoá sổ tay tự động': 'Notebook auto-lock',
+  '1 · 5 · 15 · 30 · 60 phút · Không bao giờ': '1 · 5 · 15 · 30 · 60 min · Never',
+  'Cá nhân': 'Personal', 'Ảnh đại diện': 'Avatar', 'Công ty': 'Company',
+  'Lưu trữ & nhắc hẹn': 'Archive & reminders', 'Tự động lưu trữ sau': 'Auto-archive after',
+  'chỉ ẩn nhiệm vụ đã xong, không xoá · 0 để tắt':
+    'hides finished tasks, never deletes them · 0 turns it off',
+  'Cảnh báo Deadline trước': 'Warn before deadline', 'số ngày': 'days',
+  'Giờ gửi nhắc': 'Reminder time', 'Tần suất trong ngày': 'Times per day',
+  'gửi theo lịch cần tiến trình cron chạy nền':
+    'scheduled sending needs a background cron process',
+  'Bot Token': 'Bot token', 'Token từ @BotFather': 'Token from @BotFather',
+  'Chat ID kiểm tra': 'Test chat ID', 'Chưa nối': 'Not connected',
+  'Zalo User ID test': 'Zalo test user ID',
+  'Sao lưu & đồng bộ': 'Backup & sync', 'Xuất bản sao (JSON)': 'Export backup (JSON)',
+  'Thay toàn bộ · từ chối file không có người dùng nào':
+    'Replaces everything · refuses a file with no users',
+  'phải gõ đúng chữ RESET để xác nhận': 'you must type RESET exactly to confirm',
+
   // login
-  'Đăng nhập': 'Sign in', 'Đăng xuất': 'Sign out',
+  'Đăng nhập': 'Sign in', 'Đăng xuất': 'Sign out', 'Hiện mật khẩu': 'Show password',
   'Sai tên đăng nhập hoặc mật khẩu': 'Wrong username or password',
   'Phiên đã tự khoá do không hoạt động': 'Session locked after inactivity',
   'Tài khoản demo': 'Demo account',
@@ -256,6 +328,16 @@ const DICT_EN_RE: Array<[RegExp, Replacer]> = [
   [/^Khung giờ (\d+):00 – (\d+):00$/, 'Hours $1:00 – $2:00'],
   [/^Tháng (\d+), (\d+)$/, '$1/$2'],
   [/^Xin chào, (.+)$/, 'Welcome, $1'],
+
+  // ── phone shell ──
+  // These only fire when the whole phrase reaches t(); building a sentence out
+  // of separately-translated words is what left the phone half in each language.
+  [/^(\d+) quá hạn$/, '$1 overdue'],
+  [/^trên (\d+) dự án$/, (_m, n) => (n === '1' ? 'across 1 project' : `across ${n} projects`)],
+  [/^(\d+) lần$/, (_m, n) => (n === '1' ? 'once a day' : `${n}× a day`)],
+  [/^phiên bản (\d+)\/(\d+)$/, 'version $1/$2'],
+  [/^Chào buổi (sáng|chiều|tối), (.+)$/, (_m, p, n) =>
+    `Good ${p === 'sáng' ? 'morning' : p === 'chiều' ? 'afternoon' : 'evening'}, ${n}`],
 ];
 
 /** Look one phrase up. Returns null when nothing in the dictionary matches. */

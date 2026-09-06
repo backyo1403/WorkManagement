@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, EmptyState, Modal, PageHeader, PriorityPill } from '@/components/ui/primitives';
 import { SearchBox } from '@/components/ui/SearchBox';
-import { computeNotifications } from '@/components/shell/AppShell';
 import { TaskModal } from '@/components/task/TaskModal';
 import {
   DashClock,
@@ -21,7 +20,7 @@ import {
   statusCounts,
   useScopedTasks,
 } from '@/components/dashboard/widgets';
-import { dayPart, locale } from '@/lib/domain';
+import { computeNotifications, dayPart, locale } from '@/lib/domain';
 import type { DashWidgetLayout } from '@/lib/types';
 import { useAuth } from '@/state/AuthProvider';
 import { useData } from '@/state/DataProvider';

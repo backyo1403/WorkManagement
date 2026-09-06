@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { EmptyState, PageHeader } from '@/components/ui/primitives';
-import { computeNotifications } from '@/components/shell/AppShell';
+import { computeNotifications } from '@/lib/domain';
 import { TaskModal } from '@/components/task/TaskModal';
 import { useData } from '@/state/DataProvider';
 import { usePrefs } from '@/state/PrefsProvider';
