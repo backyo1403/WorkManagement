@@ -3988,8 +3988,12 @@ body:has(.m-root) .weather-layer{display:none !important;}
 /* The rig frames Tobby for a 160x185 dock, so in a 58px cell he comes out
    about a third of the size the design asks for. Scaling the finished canvas
    is cheaper than re-aiming the shared camera. */
-.m-root .tb-stage canvas{transform:scale(1.85); transform-origin:50% 58%;}
+.m-root .tb-stage canvas{transform:translateY(-36px) scale(2); transform-origin:50% 50%;}
 .m-root .m-group-chip{text-transform:uppercase;}
+
+/* The day strip scrolls; seven still fit across, the rest is a swipe away. */
+.m-week.scroll{overflow-x:auto; scroll-snap-type:x proximity;}
+.m-week.scroll .m-day{flex:0 0 calc((100% - 48px) / 7); scroll-snap-align:center;}
 </style>
 </head>
 <body>
@@ -4098,6 +4102,9 @@ let LANG = (function(){ try{ return localStorage.getItem('bachoffice.lang') || '
 function loc(){ return LANG==='en' ? 'en-US' : 'vi-VN'; }
 const DICT_EN = {
   /* ---- phone shell ---- */
+  "Đăng xuất": "Sign out",
+  "Toàn màn hình": "Full screen",
+  "Thoát toàn màn hình": "Exit full screen",
   "Ngôn ngữ": "Language",
   "Đến hạn hôm nay": "Due today",
   "Cần chú ý": "Needs attention",
@@ -4708,6 +4715,10 @@ const ICON_PATHS = {
   plus:     'M12 5v14M5 12h14',
   edit:     'M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z',
   trash:    'M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6',
+  'chevron-left': 'M15 18l-6-6 6-6',
+  /* the bare tick: `check` draws a ticked box, wrong inside a checkbox */
+  tick: 'M5 13l4 4L19 7',
+  expand: 'M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3',
   chevron:  'M9 18l6-6-6-6',
   download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
   upload:   'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
@@ -19108,7 +19119,11 @@ function mViewKanban(){
 /* ---------- 6. Thời gian biểu ---------- */
 function mViewTimetable(){
   const day = mDay();
-  const week = Array.from({length:7}, (_,i)=> mAddDays(mStartOfWeek(day), i));
+  /* Four weeks behind and eight ahead, scrolled rather than paged: the strip
+     used to show exactly the week around the selected day, which left no way
+     to reach yesterday-but-one or next month. */
+  const first = mAddDays(mStartOfWeek(day), -28);
+  const week = Array.from({length:84}, (_,i)=> mAddDays(first, i));
   const START = 6, END = 22;
   const items = [];
   mTasks().forEach(t=>{
@@ -19119,7 +19134,7 @@ function mViewTimetable(){
 
   return `
   <div class="m-page" style="gap:12px;padding-top:8px">
-    <div class="m-week m-pad">
+    <div class="m-week scroll m-scroller m-pad" id="mWeekStrip">
       ${week.map(d=>`<button type="button" class="m-day${mSameDay(d,day)?' on':''}" data-mday="${+d}">
         <span class="m-day-dow">${mDow()[d.getDay()]}</span>
         <span class="m-day-num m-num">${d.getDate()}</span></button>`).join('')}
@@ -19578,6 +19593,7 @@ function mMoreMenu(){
     <button type="button" class="m-pop-scrim" data-mclose="more" aria-label="Đóng"></button>
     <div class="m-pop more">
       ${rows.map(([k,l,ic])=>`<button type="button" data-mgo="${k}">${icon(ic,17,'color:var(--text-2)')}<span class="m-pop-label">${esc(l)}</span></button>`).join('')}
+      <button type="button" id="mFullscreen">${icon('expand',17,'color:var(--text-2)')}<span class="m-pop-label">${mIsFullscreen()?'Thoát toàn màn hình':'Toàn màn hình'}</span></button>
       <button type="button" id="mLogout">${icon('power',17,'color:var(--danger)')}<span class="m-pop-label" style="color:var(--danger)">Đăng xuất</span></button>
     </div></div>`;
 }
@@ -19650,6 +19666,19 @@ function renderMobileShell(){
   try{ wireTobbyStage(); }catch(e){}
 }
 
+function mIsFullscreen(){ return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+/** iPhone Safari has no Fullscreen API at all — only Add to Home Screen
+ *  drops the browser chrome there — so say that rather than failing mute. */
+function mToggleFullscreen(){
+  const el = document.documentElement;
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  const exit = document.exitFullscreen || document.webkitExitFullscreen;
+  if(!req){ toast('Safari trên iPhone không có toàn màn hình — dùng Chia sẻ › Thêm vào MH chính'); renderMobileShell(); return; }
+  try{ if(mIsFullscreen()) exit.call(document); else req.call(el); }
+  catch(e){ toast('Không chuyển được sang toàn màn hình'); }
+  setTimeout(renderMobileShell, 150);
+}
+
 function mGo(screen){
   MOBILE.screen = screen;
   MOBILE.groupMenu = MOBILE.more = MOBILE.compose = false;
@@ -19683,6 +19712,8 @@ function wireMobile(){
   if(av) av.onclick = ()=>{ MOBILE.more = !MOBILE.more; MOBILE.groupMenu=false; renderMobileShell(); };
   const tob = document.getElementById('mTobbyBtn');
   if(tob) tob.onclick = ()=>{ MOBILE.compose = true; MOBILE.field=null; renderMobileShell(); };
+  const fsBtn = document.getElementById('mFullscreen');
+  if(fsBtn) fsBtn.onclick = ()=>{ MOBILE.more = false; mToggleFullscreen(); };
   const lo = document.getElementById('mLogout');
   if(lo) lo.onclick = ()=>{ MOBILE.more=false; if(confirm('Đăng xuất khỏi Bach Office?')) logout(); };
 
@@ -19716,6 +19747,12 @@ function wireMobile(){
       const i = Math.max(0, Math.min(TASK_STATUSES.length-1, Math.round(rail.scrollLeft/step)));
       document.querySelectorAll('#mKbDots i').forEach((d,j)=> d.classList.toggle('on', j===i));
     });
+  }
+
+  const strip = document.getElementById('mWeekStrip');
+  if(strip){
+    const sel = strip.querySelector('.m-day.on');
+    if(sel) strip.scrollLeft = sel.offsetLeft - strip.clientWidth/2 + sel.offsetWidth/2;
   }
 
   /* timetable + calendar */
