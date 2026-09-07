@@ -26,10 +26,16 @@
 {
   "imports": {
     "three": "/vendor/three/build/three.module.js",
-    "three/addons/": "/vendor/three/addons/"
+    "three/addons/": "/vendor/three/addons/",
+    "firebase/app": "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js",
+    "firebase/auth": "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js",
+    "firebase/database": "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js"
   }
 }
 </script>
+<!-- Firebase: sync and sign-in. Pinned to an exact version, and entirely
+     optional — see public/firebase-boot.js for what happens when it fails. -->
+<script type="module" src="/firebase-boot.js"></script>
 <script>
 (function(){ try{
   var t = localStorage.getItem('bachoffice.theme');
