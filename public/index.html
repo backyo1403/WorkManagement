@@ -3994,6 +3994,22 @@ body:has(.m-root) .weather-layer{display:none !important;}
 /* The day strip scrolls; seven still fit across, the rest is a swipe away. */
 .m-week.scroll{overflow-x:auto; scroll-snap-type:x proximity;}
 .m-week.scroll .m-day{flex:0 0 calc((100% - 48px) / 7); scroll-snap-align:center;}
+
+/* iPhone-style pickers: the choice stays in a band at the centre and the
+   numbers travel under it, so the padding is what lets the first and last
+   values reach the middle. */
+.m-wheels{position:relative;}
+.m-wheel{padding:48px 0; scroll-snap-type:y mandatory;}
+.m-wheel button{scroll-snap-align:center; background:none;}
+.m-wheel button.on{background:none; color:var(--brand); font-weight:700;}
+.m-wheel-band{position:absolute; left:0; right:0; top:48px; height:44px;
+  border-top:1px solid var(--border-strong); border-bottom:1px solid var(--border-strong);
+  background:rgba(108,147,255,.08); pointer-events:none; border-radius:8px;}
+/* A right-aligned value that is also an input. */
+.m-tfield{border:none; outline:none; background:none; text-align:right;
+  font:inherit; color:var(--brand); min-width:0;}
+/* The desktop confirm modal is 420px wide; on a phone it has to fit. */
+@media (max-width:699px){ .overlay .modal{width:auto !important; max-width:calc(100vw - 32px);} }
 </style>
 </head>
 <body>
@@ -4102,6 +4118,10 @@ let LANG = (function(){ try{ return localStorage.getItem('bachoffice.lang') || '
 function loc(){ return LANG==='en' ? 'en-US' : 'vi-VN'; }
 const DICT_EN = {
   /* ---- phone shell ---- */
+  "Thêm công việc con": "Add subtask",
+  "Ước lượng (giờ)": "Estimate (hours)",
+  "— Chưa giao —": "— Unassigned —",
+  "Xoá hết dữ liệu (RESET)": "Erase all data (RESET)",
   "Đăng xuất": "Sign out",
   "Toàn màn hình": "Full screen",
   "Thoát toàn màn hình": "Exit full screen",
@@ -18831,6 +18851,7 @@ const MOBILE = {
   notebook: 'all',
   subEdit: null,         // checklist row being edited in the task sheet
   field: null,           // open accordion in the create sheet
+  taskField: null,       // open accordion in the task sheet
   day: null,             // selected day (timetable + calendar), ms
   month: null,           // first of the displayed month, ms
   draft: null,           // create-sheet draft
@@ -18862,6 +18883,8 @@ const M_STATUS_COLOR = {
   'Hoàn thành':'var(--success)', 'Sự kiện':'var(--purple)',
 };
 const M_PRI_CLASS = { 'ASAP':'ASAP', 'Cao':'HIGH', 'Trung bình':'MEDIUM', 'Thấp':'LOW' };
+/** The pill colours, reused for the dot beside each option in a picker. */
+const M_PRI_COLOR = { 'ASAP':'#F0705F', 'Cao':'#EF4444', 'Trung bình':'#F3B23F', 'Thấp':'#98A1B8' };
 /* Sunday-indexed to match Date.getDay(). Spelled out rather than taken from
    toLocaleDateString, whose Vietnamese short form is "Th 2" and not the
    two-character T2..CN the grid is built around. */
@@ -19303,7 +19326,7 @@ function mViewNote(){
 
 /* ---------- 10. Dự án ---------- */
 function mViewProjects(){
-  const list = (STATE.projects||[]).filter(p=>!ACTIVE_GROUP || p.departmentId===ACTIVE_GROUP);
+  const list = (STATE.projects||[]).filter(p=>!ACTIVE_GROUP || p.groupId===ACTIVE_GROUP);
   if(!list.length) return `<div class="m-page m-empty">Chưa có dự án nào</div>`;
   const stTone = { 'Chưa bắt đầu':['var(--surface-3)','var(--text-2)'],
                    'Đang thực hiện':['var(--purple-soft)','var(--purple)'],
@@ -19312,12 +19335,12 @@ function mViewProjects(){
     const owned = STATE.tasks.filter(t=>!t.archived && t.projectId===p.id);
     const pct = owned.length ? Math.round(owned.filter(t=>t.status==='Hoàn thành').length/owned.length*100) : 0;
     const owner = empById(p.ownerId);
-    const g = WORK_GROUPS.find(x=>x.key===p.departmentId);
-    const accent = M_GROUP_ACCENT[p.departmentId] || 'var(--brand)';
+    const g = WORK_GROUPS.find(x=>x.key===p.groupId);
+    const accent = M_GROUP_ACCENT[p.groupId] || 'var(--brand)';
     const tone = stTone[p.status] || stTone['Chưa bắt đầu'];
     return `<div class="m-proj-card">
       <div class="m-proj-head">
-        <div class="m-proj-icon" style="background:${mTint(p.color,'26')}">${icon('folder',19,'color:'+p.color)}</div>
+        <div class="m-proj-icon" style="background:${mTint(p.color,'26')};font-size:19px">${esc(p.icon||'')||icon('folder',19,'color:'+p.color)}</div>
         <div class="m-col" style="flex:1;min-width:0;gap:3px">
           <div class="m-proj-name">${esc(p.name)}</div>
           ${p.description?`<div class="m-proj-desc">${esc(p.description)}</div>`:''}
@@ -19376,6 +19399,8 @@ function mViewSettings(){
       mSetRow('Ngôn ngữ','', mSetValue(LANG==='vi'?'Tiếng Việt':'English'), 'data-mact="lang"') +
       mSetRow('Giao diện','Bản điện thoại chỉ dùng giao diện tối', `<span class="m-row-value"><span>Tối</span></span>`))}
     ${group('Cá nhân',
+      mSetRow('Ảnh đại diện','', `<label style="flex-shrink:0;cursor:pointer">${avatarHtml(u,34)}
+        <input type="file" accept="image/*" id="mAvatarFile" hidden></label>`) +
       mSetRow('Họ tên','', field('name', u.name)) +
       mSetRow('Email','', field('email', u.email, 'email')) +
       mSetRow('Điện thoại','', field('phone', u.phone)))}
@@ -19386,6 +19411,11 @@ function mViewSettings(){
       mSetRow('Tự động lưu trữ sau','chỉ ẩn nhiệm vụ đã xong, không xoá · 0 để tắt', field('autoArchiveDays', s.autoArchiveDays, 'number')) +
       mSetRow('Cảnh báo Deadline trước','số ngày', field('reminderDaysBefore', s.reminderDaysBefore, 'number')) +
       mSetRow('Giờ gửi nhắc','', field('reminderTime', s.reminderTime, 'time')))}
+    ${group('Sao lưu & đồng bộ',
+      `<button type="button" class="m-row" id="mResetAll">
+        <span class="m-row-body"><span class="m-row-title danger">Xoá hết dữ liệu (RESET)</span>
+        <span class="m-row-sub">phải gõ đúng chữ RESET để xác nhận</span></span>
+        ${icon('trash',16,'color:var(--danger)')}</button>`)}
   </div>`;
 }
 
@@ -19435,12 +19465,16 @@ function mTaskSheet(){
           <div class="m-foot-note">Tiến độ suy ra từ công việc con</div>
         </div>
 
-        <div class="m-meta-table">
-          ${line('Dự án', p?p.name:'Không thuộc dự án')}
-          ${line('Người phụ trách', who?who.name:'Chưa giao')}
-          ${dateRows}
-          ${line('Ước lượng', t.estimateHours?t.estimateHours+'h':'—')}
-          ${line('Nhóm', g?g.name:'—')}
+        <div class="m-col" style="gap:8px">
+          ${mTAcc('project','Dự án', t.projectId||'', [{key:'',label:'— Không thuộc dự án —',dot:'var(--text-3)'}]
+            .concat((STATE.projects||[]).filter(x=>x.groupId===t.departmentId).map(x=>({key:x.id,label:x.name,dot:x.color}))))}
+          ${mTAcc('assignee','Người phụ trách', t.assigneeId||'', [{key:'',label:'— Chưa giao —',dot:'var(--text-3)'}]
+            .concat((STATE.employees||[]).map(x=>({key:x.id,label:x.name,dot:'var(--brand)'}))))}
+          ${mTAcc('priority','Độ ưu tiên', t.priority, TASK_PRIORITIES.map(([f])=>({key:f,label:f,dot:M_PRI_COLOR[f]})))}
+          ${mTAcc('group','Nhóm', t.departmentId||'', WORK_GROUPS.map(x=>({key:x.key,label:x.name,dot:M_GROUP_ACCENT[x.key]})))}
+          ${mTField(isEvent(t)?'Bắt đầu sự kiện':'Bắt đầu','start','datetime-local', mLocalInput(t.start))}
+          ${mTField(isEvent(t)?'Kết thúc sự kiện':'Hạn chót','deadline','datetime-local', mLocalInput(t.deadline))}
+          ${mTField('Ước lượng (giờ)','estimateHours','number', t.estimateHours==null?'':t.estimateHours)}
         </div>
 
         <div class="m-col" style="gap:8px">
@@ -19465,7 +19499,10 @@ function mTaskSheet(){
                     <button type="button" class="m-done-btn" data-msubdone="${sub.id}">Xong</button>
                   </div></div>`:''}
               </div>`;
-            }).join('') : `<div class="m-empty" style="padding:22px 16px">Chưa có công việc con</div>`}
+            }).join('') : ''}
+            <button type="button" class="m-row" id="mAddSub" style="min-height:48px">
+              <span class="m-box add">+</span>
+              <span class="m-row-title" style="color:var(--text-3)">Thêm công việc con</span></button>
           </div>
         </div>
 
@@ -19516,7 +19553,7 @@ function mAccList(id, label, value, options){
 }
 function mAccDate(id, label, p){
   const open = MOBILE.field === id;
-  const wheel = (kind, items, val, flex) => `<div class="m-wheel${flex?' year':''}" data-mwheel="${kind}">
+  const wheel = (kind, items, val, flex) => `<div class="m-wheel${flex?' year':''}" data-mwheel="${kind}" data-mwheelfield="${id}" data-mwheelidx="${Math.max(0,items.indexOf(val))}">
     ${items.map(v=>`<button type="button" class="${v===val?'on':''}" data-mwheelval="${v}" data-mwheelkind="${kind}" data-mwheelfield="${id}">${kind==='y'?v:mPad(v)}</button>`).join('')}</div>`;
   const range = (a,b)=>Array.from({length:b-a+1},(_,i)=>a+i);
   const thisYear = new Date().getFullYear();
@@ -19528,7 +19565,7 @@ function mAccDate(id, label, p){
     </button>
     ${open?`<div class="m-wheels-wrap">
       <div class="m-wheel-heads"><span>NGÀY</span><span>THÁNG</span><span class="year">NĂM</span><span>GIỜ</span><span>PHÚT</span></div>
-      <div class="m-wheels">
+      <div class="m-wheels"><span class="m-wheel-band" aria-hidden="true"></span>
         ${wheel('d', range(1, mDaysIn(p.m,p.y)), p.d)}
         ${wheel('m', range(1,12), p.m)}
         ${wheel('y', range(thisYear-1, thisYear+5), p.y, true)}
@@ -19543,9 +19580,9 @@ function mComposeSheet(){
   const asEvent = d.status === 'Sự kiện';
   const groups = WORK_GROUPS.map(g=>({key:g.key, label:g.name, dot:M_GROUP_ACCENT[g.key]}));
   const projects = [{key:'',label:'— Không thuộc dự án —',dot:'var(--text-3)'}]
-    .concat((STATE.projects||[]).filter(p=>p.departmentId===d.departmentId).map(p=>({key:p.id,label:p.name,dot:p.color})));
+    .concat((STATE.projects||[]).filter(p=>p.groupId===d.departmentId).map(p=>({key:p.id,label:p.name,dot:p.color})));
   const statuses = TASK_STATUSES.map(s=>({key:s,label:s,dot:M_STATUS_COLOR[s]}));
-  const prios = TASK_PRIORITIES.map(([full])=>({key:full,label:full,dot:'var(--text-3)'}));
+  const prios = TASK_PRIORITIES.map(([full])=>({key:full,label:full,dot:M_PRI_COLOR[full]}));
   const books = [{key:'',label:'— Chưa xếp sổ —',dot:'var(--text-3)'}]
     .concat((STATE.notebooks||[]).map(b=>({key:b.id,label:b.name,dot:b.color||'var(--text-3)'})));
 
@@ -19679,10 +19716,44 @@ function mToggleFullscreen(){
   setTimeout(renderMobileShell, 150);
 }
 
+
+/* ---------- task sheet: editable rows ---------- */
+/** ISO -> the value a <input type=datetime-local> wants, in local time. */
+function mLocalInput(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,16);
+}
+/** Accordion row for the task sheet. Same shape as the create sheet's, on its
+ *  own data attributes so the two sets of handlers cannot cross. */
+function mTAcc(id, label, value, options){
+  const open = MOBILE.taskField === id;
+  const cur = options.find(o=>o.key===value) || options[0] || {label:''};
+  return `<div class="m-acc${open?' open':''}">
+    <button type="button" class="m-acc-head" data-tacc="${id}">
+      <span class="m-acc-label">${esc(label)}</span>
+      <span class="m-acc-value">${esc(cur.label)}</span>
+      <span class="m-acc-caret">${icon('chevron',13,'transform:rotate(90deg)')}</span>
+    </button>
+    ${open?`<div class="m-acc-list">${options.map(o=>`
+      <button type="button" class="m-opt${o.key===value?' on':''}" data-tpick="${id}" data-tval="${esc(o.key)}">
+        <span class="m-dot" style="width:8px;height:8px;background:${o.dot||'var(--text-3)'}"></span>
+        <span class="m-opt-label">${esc(o.label)}</span>
+        ${o.key===value?icon('tick',15,'color:var(--brand)'):''}
+      </button>`).join('')}</div>`:''}
+  </div>`;
+}
+function mTField(label, id, type, value){
+  return `<div class="m-acc"><div class="m-acc-head" style="cursor:default">
+    <span class="m-acc-label">${esc(label)}</span>
+    <input class="m-acc-value m-tfield" type="${type}" data-tfield="${id}" value="${esc(value)}">
+  </div></div>`;
+}
+
 function mGo(screen){
   MOBILE.screen = screen;
   MOBILE.groupMenu = MOBILE.more = MOBILE.compose = false;
-  MOBILE.taskId = null; MOBILE.subEdit = null; MOBILE.field = null;
+  MOBILE.taskId = null; MOBILE.subEdit = null; MOBILE.field = null; MOBILE.taskField = null;
   renderMobileShell();
 }
 
@@ -19695,7 +19766,7 @@ function wireMobile(){
     const el = e.currentTarget;
     if(el.dataset.mgo) mGo(el.dataset.mgo);
   });
-  on('[data-mtask]','click', e=>{ MOBILE.taskId = e.currentTarget.dataset.mtask; MOBILE.subEdit=null; renderMobileShell(); });
+  on('[data-mtask]','click', e=>{ MOBILE.taskId = e.currentTarget.dataset.mtask; MOBILE.subEdit=null; MOBILE.taskField=null; renderMobileShell(); });
   on('[data-mnote]','click', e=>{ MOBILE.noteId = e.currentTarget.dataset.mnote; mGo('note'); });
   on('[data-mclose]','click', e=>{
     const k = e.currentTarget.dataset.mclose;
@@ -19818,6 +19889,101 @@ function wireMobile(){
     persist(); toast('Đã lưu');
   });
 
+
+  /* ----- task sheet: pickers and plain fields ----- */
+  on('[data-tacc]','click', e=>{
+    const id = e.currentTarget.dataset.tacc;
+    MOBILE.taskField = (MOBILE.taskField === id) ? null : id;
+    renderMobileShell();
+  });
+  on('[data-tpick]','click', e=>{
+    const f = e.currentTarget.dataset.tpick, v = e.currentTarget.dataset.tval;
+    const patch = {};
+    if(f==='project')  patch.projectId  = v || null;
+    if(f==='assignee'){ patch.assigneeId = v || null; patch.executorIds = v ? [v] : []; }
+    if(f==='priority') patch.priority   = v;
+    if(f==='group')    patch.departmentId = v;
+    MOBILE.taskField = null;
+    updateTask(MOBILE.taskId, patch);
+    renderMobileShell();
+  });
+  on('[data-tfield]','change', e=>{
+    const f = e.currentTarget.dataset.tfield, v = e.currentTarget.value;
+    const patch = {};
+    if(f==='estimateHours') patch.estimateHours = Number(v) || 0;
+    else patch[f] = v ? new Date(v).toISOString() : null;
+    updateTask(MOBILE.taskId, patch);
+    renderMobileShell();
+  });
+  const addSub = document.getElementById('mAddSub');
+  if(addSub) addSub.onclick = ()=>{
+    const t = STATE.tasks.find(x=>x.id===MOBILE.taskId); if(!t) return;
+    t.checklist = t.checklist || [];
+    const item = { id: uid(), text:'', done:false, deadline:null, start:null };
+    t.checklist.push(item);
+    MOBILE.subEdit = item.id;               // open it for typing straight away
+    updateTask(t.id, { checklist: t.checklist });
+    renderMobileShell();
+    document.getElementById('mSubText')?.focus();
+  };
+
+  /* ----- the date wheels move under a fixed band ----- */
+  root.querySelectorAll('.m-wheel').forEach(w=>{
+    const items = [...w.querySelectorAll('button')];
+    const ITEM = 44;
+    w.scrollTop = Number(w.dataset.mwheelidx||0) * ITEM;
+    let timer = null;
+    w.addEventListener('scroll', ()=>{
+      clearTimeout(timer);
+      /* Settle first, then commit: reading mid-flick would fire a write per
+         frame, and re-rendering would yank the wheel out from under the
+         thumb. The label is patched in place instead. */
+      timer = setTimeout(()=>{
+        const idx = Math.max(0, Math.min(items.length-1, Math.round(w.scrollTop/ITEM)));
+        const btn = items[idx]; if(!btn) return;
+        items.forEach((b,i)=> b.classList.toggle('on', i===idx));
+        const d = mDraft(), field = w.dataset.mwheelfield, kind = btn.dataset.mwheelkind;
+        const p = d[field]; if(!p) return;
+        p[kind] = Number(btn.dataset.mwheelval);
+        if(kind==='m' || kind==='y') p.d = Math.min(p.d, mDaysIn(p.m, p.y));
+        const head = w.closest('.m-acc')?.querySelector('.m-acc-value');
+        if(head) head.textContent = mPartsLabel(p);
+      }, 120);
+    }, {passive:true});
+  });
+
+  /* ----- the month grid answers a sideways swipe ----- */
+  const grid = root.querySelector('.m-cal-grid');
+  if(grid){
+    let x0 = null, y0 = null;
+    grid.addEventListener('touchstart', e=>{ const t=e.changedTouches[0]; x0=t.clientX; y0=t.clientY; }, {passive:true});
+    grid.addEventListener('touchend', e=>{
+      if(x0===null) return;
+      const t = e.changedTouches[0], dx = t.clientX-x0, dy = t.clientY-y0;
+      x0 = null;
+      /* Sideways only, and far enough that it cannot be a tap that slipped. */
+      if(Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy)*1.5) return;
+      const m = mMonth();
+      MOBILE.month = +new Date(m.getFullYear(), m.getMonth() + (dx<0?1:-1), 1);
+      renderMobileShell();
+    }, {passive:true});
+  }
+
+  /* ----- settings: avatar and the reset ----- */
+  const av2 = document.getElementById('mAvatarFile');
+  if(av2) av2.onchange = ()=>{
+    const f = av2.files && av2.files[0]; av2.value = '';
+    const u = currentUser(); if(!f || !u) return;
+    if(f.size > 1500000){ toast('Ảnh cần dưới 1.5MB'); return; }
+    const r = new FileReader();
+    r.onload = ()=>{ u.avatarUrl = r.result; persist(); toast('Đã cập nhật ảnh đại diện'); renderMobileShell(); };
+    r.readAsDataURL(f);
+  };
+  const rs = document.getElementById('mResetAll');
+  /* The desktop confirm modal, reused: it is the one place that insists on
+     the word RESET, and a second copy of that rule could drift from it. */
+  if(rs) rs.onclick = ()=>{ try{ openResetConfirmModal(); }catch(e){ toast('Không mở được hộp thoại xoá'); } };
+
   wireMobileSheets(root, on);
 }
 
@@ -19885,14 +20051,10 @@ function wireMobileSheets(root, on){
     MOBILE.field = null;
     renderMobileShell();
   });
+  /* Tapping a number scrolls it under the band; the scroll handler commits it. */
   on('[data-mwheelval]','click', e=>{
-    const d = mDraft(), el = e.currentTarget;
-    const p = d[el.dataset.mwheelfield];
-    const kind = el.dataset.mwheelkind, v = Number(el.dataset.mwheelval);
-    p[kind] = v;
-    if(kind==='m' || kind==='y') p.d = Math.min(p.d, mDaysIn(p.m, p.y));
-    const ti = document.getElementById('mComposeTitle'); if(ti) d.title = ti.value;
-    renderMobileShell();
+    const el = e.currentTarget, w = el.closest('.m-wheel');
+    if(w) w.scrollTo({top: el.offsetTop, behavior:'smooth'});
   });
   const go = document.getElementById('mComposeGo');
   if(go) go.onclick = ()=>{
@@ -19917,11 +20079,6 @@ function wireMobileSheets(root, on){
     renderMobileShell();
   };
 
-  /* Centre the current value in each open wheel, the way a picker does. */
-  root.querySelectorAll('.m-wheel').forEach(w=>{
-    const sel = w.querySelector('button.on');
-    if(sel) w.scrollTop = sel.offsetTop - w.clientHeight/2 + 22;
-  });
 }
 
 /* Re-render when the viewport crosses the phone breakpoint, so rotating the
