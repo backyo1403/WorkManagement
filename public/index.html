@@ -4028,9 +4028,16 @@ body:has(.m-root) .weather-layer{display:none !important;}
 @keyframes boPulse{0%,100%{opacity:1;} 50%{opacity:.3;}}
 /* Beside the signed-in name, before the power button. */
 .bo-dot-side{margin-left:auto; margin-right:2px;}
-/* Under Tobby's feet, pinned so it cannot push him off his line. */
-.m-tab-tobby{position:relative;}
-.bo-dot-tab{position:absolute; left:50%; bottom:5px; transform:translateX(-50%);}
+/* On the phone the state is a ring around the avatar rather than a dot of its
+   own: the tab bar had no room for a mark that small to read as anything, and
+   the avatar is already the thing you press to ask about your account. */
+.m-avatar-btn[data-bo-sync]{transition:box-shadow .25s ease;}
+.m-avatar-btn[data-state="live"]{box-shadow:0 0 0 2px var(--success), 0 0 9px rgba(63,203,134,.55);}
+.m-avatar-btn[data-state="syncing"]{box-shadow:0 0 0 2px var(--brand), 0 0 9px rgba(108,147,255,.6);
+  animation:boPulse 1.1s ease-in-out infinite;}
+.m-avatar-btn[data-state="offline"]{box-shadow:0 0 0 2px var(--warning), 0 0 9px rgba(243,178,63,.55);}
+.m-avatar-btn[data-state="error"]{box-shadow:0 0 0 2px var(--danger), 0 0 10px rgba(240,112,95,.65);}
+.m-avatar-btn[data-state="off"]{box-shadow:0 0 0 2px var(--border-strong);}
 </style>
 </head>
 <body>
@@ -4139,6 +4146,7 @@ let LANG = (function(){ try{ return localStorage.getItem('bachoffice.lang') || '
 function loc(){ return LANG==='en' ? 'en-US' : 'vi-VN'; }
 const DICT_EN = {
   /* ---- phone shell ---- */
+  "Ghi nhớ đăng nhập — gõ yes": "Remember me — type yes",
   "Đã đồng bộ": "Synced",
   "Mọi thay đổi đã lên đám mây": "Everything is on the cloud",
   "Chỉ lưu trên máy này": "Saved on this device only",
@@ -5516,8 +5524,6 @@ function boApplyRemote(remote){
   }
 }
 
-function boCount(v){ return v ? Object.keys(v).length : 0; }
-
 /** The first exchange after signing in, which is the only one that can lose
  *  data — so it asks instead of guessing. Everything after it is automatic. */
 async function boFirstSync(){
@@ -5531,29 +5537,18 @@ async function boFirstSync(){
     return false;
   }
 
-  const localTasks = (STATE.tasks||[]).length;
-  const remoteTasks = boCount(remote && remote.tasks);
+  /* Nothing to overwrite, so nothing to weigh up: seed the cloud from here.
+     A full diff is forced by clearing the shadow, which sends everything. */
+  if(!remote){ BO_SHADOW = null; return true; }
 
-  if(!remote){
-    if(!localTasks && !(STATE.projects||[]).length){ boSnapshotShadow(); return true; }
-    const ok = confirm(
-      'Đám mây đang trống.\n\nĐưa dữ liệu của máy này lên làm bản gốc?\n' +
-      '· Máy này: ' + localTasks + ' nhiệm vụ\n\n' +
-      'Nếu dữ liệu thật của bạn đang ở máy khác, hãy bấm Huỷ và đồng bộ máy đó trước.');
-    if(!ok) return false;
-    BO_SHADOW = null;          // diff against nothing: sends everything
-    return true;
-  }
+  /* The cloud is the shared copy and therefore the truth; this device is a
+     cache of it. Asking every time was the wrong question — the answer was
+     always the same, and a prompt that is always answered the same way trains
+     people to dismiss it without reading.
 
-  // Cloud wins by default — it is the shared copy, and this device may simply
-  // be behind. Replacing the cloud is offered, but it is the second option.
-  const ok = confirm(
-    'Đám mây đã có dữ liệu.\n\n' +
-    '· Đám mây: ' + remoteTasks + ' nhiệm vụ\n' +
-    '· Máy này: ' + localTasks + ' nhiệm vụ\n\n' +
-    'OK — dùng bản trên đám mây (thay dữ liệu máy này)\n' +
-    'Huỷ — không đồng bộ lần này');
-  if(!ok) return false;
+     The cost is real and worth naming: edits made here while signed out, or
+     while another device was writing, are dropped in favour of the cloud.
+     That is what a single source of truth means. */
   boApplyRemote(remote);
   return true;
 }
@@ -6009,6 +6004,14 @@ function viewLogin(){
     raw(sp('g', 'stored_passcode') + sp('o', ' = ') + sp('s', '"') +
         '<input id="login_pass" type="password" autocomplete="current-password" ' +
         'enterkeyhint="go" aria-label="Mật khẩu">' + sp('s', '"')) +
+    // Typing yes here keeps the pair for next time. It reads as a third
+    // assignment because that is what the other two are; a checkbox would have
+    // been the one control on this screen that is not a line of source.
+    raw(sp('g', 'remember_me') + sp('o', ' = ') + sp('s', '"') +
+        '<input id="login_remember" type="text" autocomplete="off" ' +
+        'autocapitalize="off" autocorrect="off" spellcheck="false" ' +
+        'enterkeyhint="go" aria-label="Ghi nhớ đăng nhập — gõ yes">' + sp('s', '"') +
+        sp('c', '  # yes')) +
     // A traceback rather than a banner. Same message, same trigger — only the
     // way it is set is different, so that a failure looks like it came from
     // the program on screen instead of from a dialog laid over it.
@@ -6080,12 +6083,43 @@ function viewLoginPanel(){
     '</div>' +
   '</div>';
 }
+/** Remembered sign-in, kept only when the third line says yes.
+ *
+ * This writes the password to localStorage in the clear. That is what was
+ * asked for and it is honest about it — obfuscating it would only look like
+ * protection. Anyone with this device, or any script running on this origin,
+ * can read it back, and if the password is the Firebase one it is a real
+ * credential for a real account. The browser's own password manager does the
+ * same job behind the OS lock screen, and the fields are already marked up for
+ * it; this is the blunter option, chosen deliberately.
+ */
+const BO_REMEMBER_KEY = 'bachoffice.remember';
+function boRememberSave(flag, u, p){
+  const on = String(flag||'').trim().toLowerCase();
+  const yes = on === 'yes' || on === 'y' || on === 'true' || on === '1';
+  try{
+    if(yes) localStorage.setItem(BO_REMEMBER_KEY, JSON.stringify({u:u, p:p}));
+    else localStorage.removeItem(BO_REMEMBER_KEY);   // anything else forgets
+  }catch(e){}
+}
+function boRememberLoad(){
+  try{ return JSON.parse(localStorage.getItem(BO_REMEMBER_KEY) || 'null'); }
+  catch(e){ return null; }
+}
+
 function wireLogin(){
   const user = document.getElementById('login_user');
   const pass = document.getElementById('login_pass');
+  const remember = document.getElementById('login_remember');
+  // Put back what was kept, so the only thing left to do is press #.
+  const saved = boRememberLoad();
+  if(saved && !user.value){ user.value = saved.u || ''; pass.value = saved.p || ''; if(remember) remember.value = 'yes'; }
   const go = async ()=>{
     const err = await boSignIn(user.value, pass.value);
-    if(!err){ loginError=""; renderApp(); boRenderSyncBadge(); toast('Xin chào, '+currentUser().name); }
+    if(!err){
+      boRememberSave(remember && remember.value, user.value, pass.value);
+      loginError=""; renderApp(); boRenderSyncBadge(); toast('Xin chào, '+currentUser().name);
+    }
     else {
       loginError = err; renderApp();
       // renderApp() has rebuilt the screen and re-run wireLogin, which sized
@@ -6121,7 +6155,7 @@ function wireLogin(){
   // CSS, so there is no focus state to mirror here and nothing to fall out of
   // step with the browser.
   const fit = (el)=>{ el.style.width = el.value.length + 'ch'; };
-  [user, pass].forEach(el=>{
+  [user, pass, remember].filter(Boolean).forEach(el=>{
     fit(el);
     el.addEventListener('input', ()=> fit(el));
     // A zero-width target cannot be clicked, so the whole line is the target.
@@ -6131,7 +6165,7 @@ function wireLogin(){
   });
   // Autofill does not fire `input` in every browser, and a filled field left at
   // zero width is the one way these lines can look broken on arrival.
-  setTimeout(()=>{ fit(user); fit(pass); }, 400);
+  setTimeout(()=>{ fit(user); fit(pass); if(remember) fit(remember); }, 400);
 
   wireCodeEditing();
 
@@ -20097,7 +20131,7 @@ function renderMobileShell(){
           <span>${esc(gd?gd.name:'Tất cả')}</span>
           ${icon('chevron',12,'transform:rotate(90deg)')}
         </button>
-        <button type="button" class="m-avatar-btn" id="mAvatarBtn" aria-label="Menu tài khoản">${
+        <button type="button" class="m-avatar-btn" id="mAvatarBtn" data-bo-sync aria-label="Menu tài khoản">${
           user && user.avatarUrl ? `<img src="${esc(user.avatarUrl)}" alt="">` : esc(initials.toUpperCase())}</button>
       </div>
       ${segs?`<div class="m-seg">${segs.map(([k,l])=>`<button type="button" class="${MOBILE.screen===k?'on':''}" data-mgo="${k}">${esc(l)}</button>`).join('')}</div>`:''}
@@ -20109,7 +20143,6 @@ function renderMobileShell(){
       ${M_TABS.slice(0,2).map(tabBtn).join('')}
       <button type="button" class="m-tab-tobby" id="mTobbyBtn" aria-label="Hôm nay cần làm gì?">
         <span class="m-tobby"><span class="tb-stage" id="tobbyStage" aria-hidden="true"></span></span>
-        ${boSyncDotHtml('bo-dot-tab')}
       </button>
       ${M_TABS.slice(2).map(tabBtn).join('')}
     </div>
