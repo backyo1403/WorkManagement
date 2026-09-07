@@ -6,26 +6,9 @@
         ".write": false
       }
     },
-
     "workspace": {
       ".read": "auth != null && root.child('members').child(auth.uid).exists()",
-      ".write": "auth != null && root.child('members').child(auth.uid).exists()",
-
-      "meta": { ".validate": true },
-      "people": { "$id": { ".validate": "newData.hasChildren(['id','name'])" } },
-      "projects": { "$id": { ".validate": "newData.hasChildren(['id','name'])" } },
-      "tasks": { "$id": { ".validate": "newData.hasChildren(['id','title'])" } },
-      "notes": { "$id": { ".validate": "newData.hasChildren(['id'])" } },
-      "notebooks": { "$id": { ".validate": "newData.hasChildren(['id','name'])" } },
-      "workflows": { "$id": { ".validate": "newData.hasChildren(['id','name'])" } },
-      "hashtags": { ".validate": true },
-
-      "$other": { ".validate": false }
-    },
-
-    "$rest": {
-      ".read": false,
-      ".write": false
+      ".write": "auth != null && root.child('members').child(auth.uid).exists()"
     }
   }
 }
