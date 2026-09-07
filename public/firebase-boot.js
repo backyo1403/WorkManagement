@@ -41,6 +41,22 @@ try {
   state.app = initializeApp(firebaseConfig);
   state.auth = authApi.getAuth(state.app);
   state.db = dbApi.getDatabase(state.app);
+
+  /**
+   * Keep the session across launches rather than across tabs.
+   *
+   * The default already tries this, but it picks IndexedDB first and falls back
+   * silently — and an iPhone opened from the home screen is exactly where that
+   * fallback lands, which would mean signing in again every single launch.
+   * Asking for localStorage explicitly is the one storage iOS keeps for a
+   * standalone web app. A refusal here is survivable: the session simply lasts
+   * as long as the tab does.
+   */
+  try {
+    await authApi.setPersistence(state.auth, authApi.browserLocalPersistence);
+  } catch (e) {
+    console.warn('[firebase] session will not outlive this tab:', e && e.message);
+  }
   state.authApi = authApi;
   state.dbApi = dbApi;
 
