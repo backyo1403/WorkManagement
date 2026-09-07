@@ -4124,6 +4124,8 @@ let LANG = (function(){ try{ return localStorage.getItem('bachoffice.lang') || '
 function loc(){ return LANG==='en' ? 'en-US' : 'vi-VN'; }
 const DICT_EN = {
   /* ---- phone shell ---- */
+  "Không lưu được lên đám mây — kiểm tra quyền truy cập": "Could not save to the cloud — check access rights",
+  "Chưa đọc được workspace trên đám mây — kiểm tra Rules": "Could not read the cloud workspace — check the Rules",
   "Sai email hoặc mật khẩu": "Wrong email or password",
   "Địa chỉ email không hợp lệ": "That email address is not valid",
   "Tài khoản hợp lệ nhưng chưa được thêm vào workspace này": "Signed in, but this account is not a member of the workspace",
@@ -4680,6 +4682,9 @@ function normalizeState(){
 function persist(){
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(STATE)); }
   catch(e){ toast('Không thể lưu — bộ nhớ trình duyệt đầy hoặc bị chặn'); }
+  // localStorage stays the offline copy: the Realtime Database web SDK has
+  // no disk cache, so without this a reload with no signal is a blank app.
+  try{ boSyncPush(); }catch(e){}
 }
 function uid(){ return Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4); }
 function nowISO(){ return new Date().toISOString(); }
@@ -5301,6 +5306,212 @@ function inActiveGroup(t){ return !ACTIVE_GROUP || t.departmentId === ACTIVE_GRO
 function inActiveGroupProject(p){ return !ACTIVE_GROUP || p.groupId === ACTIVE_GROUP; }
 function groupedProjects(){ return STATE.projects.filter(inActiveGroupProject); }
 
+/* ---------- Realtime sync ----------
+ *
+ * One shared workspace, mirrored to Firebase and back. The rule that shapes
+ * everything here: never send the whole STATE. Two devices that each save the
+ * document wholesale will take turns erasing each other's edits, and the loser
+ * never finds out. So writes are diffed against a shadow copy and only the
+ * records that actually changed go up.
+ *
+ * What is NOT synced is deliberate. currentUserId is which person you are
+ * acting as on this device; tobby is a pet that lives where it is fed; alarms,
+ * chat and notifications are local noise. Syncing those would make two
+ * browsers fight over state that was never meant to be shared.
+ *
+ * Conflict resolution is last-writer-wins per record, which is honest for a
+ * workspace this size: two people editing the same task in the same second is
+ * rare, and the alternative — merging field by field — costs more than it
+ * saves here.
+ */
+const BO_SYNCED = ['employees','departments','workflows','projects','tasks','notes','notebooks'];
+const BO_SYNCED_SINGLE = ['company','settings','hashtags'];
+let BO_SHADOW = null;      // last state agreed with the server
+let BO_APPLYING = false;   // guards against echoing a remote change back up
+let BO_SYNC_ON = false;
+let BO_PUSH_TIMER = null;
+
+function boWsRef(path){
+  const f = window.BOFire;
+  return f.dbApi.ref(f.db, 'workspace' + (path ? '/' + path : ''));
+}
+function boClone(v){ return v === undefined ? null : JSON.parse(JSON.stringify(v)); }
+function boById(list){ const o = {}; (list||[]).forEach(x=>{ if(x && x.id) o[x.id] = x; }); return o; }
+
+/** Firebase rejects undefined, and stores nothing for it — so an absent field
+ *  and a field set to undefined would round-trip differently. Null is the one
+ *  value that means the same thing on both sides. */
+function boClean(v){
+  if(Array.isArray(v)) return v.map(boClean);
+  if(v && typeof v === 'object'){
+    const o = {};
+    Object.keys(v).forEach(k=>{ o[k] = v[k] === undefined ? null : boClean(v[k]); });
+    return o;
+  }
+  return v === undefined ? null : v;
+}
+
+/* RTDB has no arrays, only objects with keys, and it hands children back in key
+   order — which for random ids is no order at all. The app cares: new tasks are
+   unshifted to the front. So the order is stored beside the records. */
+function boOrderOf(list){ return (list||[]).map(x=>x && x.id).filter(Boolean); }
+function boRebuild(byId, order){
+  const map = byId || {};
+  const seen = new Set();
+  const out = [];
+  (order||[]).forEach(id=>{ if(map[id]){ out.push(map[id]); seen.add(id); } });
+  Object.keys(map).forEach(id=>{ if(!seen.has(id)) out.push(map[id]); });
+  return out;
+}
+
+/** Every record that differs from the shadow, as one flat multi-path update. */
+function boBuildPatch(){
+  const patch = {};
+  const shadow = BO_SHADOW || {};
+
+  BO_SYNCED.forEach(key=>{
+    const now = boById(STATE[key]);
+    const was = boById(shadow[key]);
+    Object.keys(now).forEach(id=>{
+      if(JSON.stringify(now[id]) !== JSON.stringify(was[id])) patch[key + '/' + id] = boClean(now[id]);
+    });
+    // A record gone from this device is a deletion, not an omission.
+    Object.keys(was).forEach(id=>{ if(!now[id]) patch[key + '/' + id] = null; });
+    const order = boOrderOf(STATE[key]);
+    if(JSON.stringify(order) !== JSON.stringify(boOrderOf(shadow[key]))) patch['_order/' + key] = order;
+  });
+
+  BO_SYNCED_SINGLE.forEach(key=>{
+    if(JSON.stringify(STATE[key]) !== JSON.stringify(shadow[key])) patch[key] = boClean(STATE[key]);
+  });
+
+  return patch;
+}
+
+function boSnapshotShadow(){
+  const s = {};
+  BO_SYNCED.concat(BO_SYNCED_SINGLE).forEach(k=> s[k] = boClone(STATE[k]));
+  BO_SHADOW = s;
+}
+
+/** Called from persist(). Debounced, because one user action often writes
+ *  several times and each of those would otherwise be its own round trip. */
+function boSyncPush(){
+  if(!BO_SYNC_ON || BO_APPLYING) return;
+  clearTimeout(BO_PUSH_TIMER);
+  BO_PUSH_TIMER = setTimeout(()=>{
+    if(!BO_SYNC_ON) return;
+    let patch;
+    try{ patch = boBuildPatch(); }catch(e){ console.warn('[sync] diff failed', e); return; }
+    if(!Object.keys(patch).length) return;
+    const f = window.BOFire;
+    /* The shadow moves before the write resolves on purpose. RTDB applies the
+       change locally and replays it when the connection returns, so treating it
+       as sent is what makes an offline edit survive; a rejected write is
+       reported below and the next diff picks the record up again. */
+    boSnapshotShadow();
+    f.dbApi.update(boWsRef(''), patch).catch(err=>{
+      BO_SHADOW = null;   // force a full diff next time
+      console.warn('[sync] write refused', err && err.message);
+      toast('Không lưu được lên đám mây — kiểm tra quyền truy cập');
+    });
+  }, 400);
+}
+
+/** Remote state replaces local state. Guarded so the render it triggers cannot
+ *  bounce straight back up as a fresh write. */
+function boApplyRemote(remote){
+  if(!remote) return;
+  BO_APPLYING = true;
+  try{
+    const order = remote._order || {};
+    BO_SYNCED.forEach(k=>{ if(remote[k] !== undefined) STATE[k] = boRebuild(remote[k], order[k]); });
+    BO_SYNCED_SINGLE.forEach(k=>{ if(remote[k] !== undefined) STATE[k] = remote[k]; });
+    boSnapshotShadow();
+    persist();
+    if(isLoggedIn()) renderApp();
+  } finally {
+    BO_APPLYING = false;
+  }
+}
+
+function boCount(v){ return v ? Object.keys(v).length : 0; }
+
+/** The first exchange after signing in, which is the only one that can lose
+ *  data — so it asks instead of guessing. Everything after it is automatic. */
+async function boFirstSync(){
+  const f = window.BOFire;
+  let remote = null;
+  try{ const snap = await f.dbApi.get(boWsRef('')); remote = snap.exists() ? snap.val() : null; }
+  catch(e){
+    console.warn('[sync] first read refused', e && e.message);
+    toast('Chưa đọc được workspace trên đám mây — kiểm tra Rules');
+    return false;
+  }
+
+  const localTasks = (STATE.tasks||[]).length;
+  const remoteTasks = boCount(remote && remote.tasks);
+
+  if(!remote){
+    if(!localTasks && !(STATE.projects||[]).length){ boSnapshotShadow(); return true; }
+    const ok = confirm(
+      'Đám mây đang trống.\n\nĐưa dữ liệu của máy này lên làm bản gốc?\n' +
+      '· Máy này: ' + localTasks + ' nhiệm vụ\n\n' +
+      'Nếu dữ liệu thật của bạn đang ở máy khác, hãy bấm Huỷ và đồng bộ máy đó trước.');
+    if(!ok) return false;
+    BO_SHADOW = null;          // diff against nothing: sends everything
+    return true;
+  }
+
+  // Cloud wins by default — it is the shared copy, and this device may simply
+  // be behind. Replacing the cloud is offered, but it is the second option.
+  const ok = confirm(
+    'Đám mây đã có dữ liệu.\n\n' +
+    '· Đám mây: ' + remoteTasks + ' nhiệm vụ\n' +
+    '· Máy này: ' + localTasks + ' nhiệm vụ\n\n' +
+    'OK — dùng bản trên đám mây (thay dữ liệu máy này)\n' +
+    'Huỷ — không đồng bộ lần này');
+  if(!ok) return false;
+  boApplyRemote(remote);
+  return true;
+}
+
+/** Starts listening once, after sign-in. */
+async function boSyncStart(){
+  if(BO_SYNC_ON || !boFireReady() || !BO_MEMBER) return;
+  const f = window.BOFire;
+
+  const proceed = await boFirstSync();
+  if(!proceed) return;
+
+  BO_SYNC_ON = true;
+  boSyncPush();               // send whatever this device is holding
+
+  f.dbApi.onValue(boWsRef(''), (snap)=>{
+    const remote = snap.exists() ? snap.val() : null;
+    if(!remote) return;
+    // Our own write comes back as an event too; the shadow is how we tell.
+    const same = BO_SYNCED.every(k=> JSON.stringify(boById((BO_SHADOW||{})[k])) === JSON.stringify(remote[k]||{}))
+      && BO_SYNCED_SINGLE.every(k=> JSON.stringify((BO_SHADOW||{})[k]) === JSON.stringify(remote[k]));
+    if(same) return;
+    boApplyRemote(remote);
+  }, (err)=>{
+    console.warn('[sync] listener refused', err && err.message);
+    BO_SYNC_ON = false;
+  });
+
+  window.addEventListener('bofire-connection', (e)=>{
+    if(e.detail && e.detail.connected) boSyncPush();   // flush what we missed
+  });
+  console.info('[sync] live');
+}
+
+function boSyncStop(){
+  BO_SYNC_ON = false;
+  BO_SHADOW = null;
+  clearTimeout(BO_PUSH_TIMER);
+}
+
 /* ---------- Firebase sign-in ----------
  *
  * Two gates, deliberately, and they guard different things. The Firebase
@@ -5339,6 +5550,7 @@ async function boAdoptFirebaseUser(user){
   if(!person) return 'Workspace chưa có người dùng nào';
 
   BO_MEMBER = { uid:user.uid, email:user.email, personId:person.id, role:member.role || 'member' };
+  setTimeout(()=>{ boSyncStart().catch(e=> console.warn('[sync]', e)); }, 0);
   SESSION_USER_ID = person.id;
   STATE.currentUserId = person.id;
   persist();
@@ -5414,6 +5626,7 @@ function logout(reason){
   // Without this the auth listener would sign the next load straight back in.
   if(BO_MEMBER && boFireReady()){ try{ window.BOFire.authApi.signOut(window.BOFire.auth); }catch(e){} }
   BO_MEMBER = null;
+  boSyncStop();
   try{ sessionStorage.removeItem('bachoffice.session'); }catch(e){}
   stopIdleWatch();
   loginError = reason || "";
