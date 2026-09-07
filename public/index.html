@@ -4124,6 +4124,12 @@ let LANG = (function(){ try{ return localStorage.getItem('bachoffice.lang') || '
 function loc(){ return LANG==='en' ? 'en-US' : 'vi-VN'; }
 const DICT_EN = {
   /* ---- phone shell ---- */
+  "Sai email hoặc mật khẩu": "Wrong email or password",
+  "Địa chỉ email không hợp lệ": "That email address is not valid",
+  "Tài khoản hợp lệ nhưng chưa được thêm vào workspace này": "Signed in, but this account is not a member of the workspace",
+  "Không đọc được quyền truy cập — kiểm tra Security Rules": "Could not read access rights — check the Security Rules",
+  "Chưa bật Email/Password trong Firebase Console": "Email/Password is not enabled in the Firebase Console",
+  "Thử quá nhiều lần — đợi một lát rồi thử lại": "Too many attempts — wait a moment and try again",
   "Thêm công việc con": "Add subtask",
   "Ước lượng (giờ)": "Estimate (hours)",
   "— Chưa giao —": "— Unassigned —",
@@ -5295,6 +5301,97 @@ function inActiveGroup(t){ return !ACTIVE_GROUP || t.departmentId === ACTIVE_GRO
 function inActiveGroupProject(p){ return !ACTIVE_GROUP || p.groupId === ACTIVE_GROUP; }
 function groupedProjects(){ return STATE.projects.filter(inActiveGroupProject); }
 
+/* ---------- Firebase sign-in ----------
+ *
+ * Two gates, deliberately, and they guard different things. The Firebase
+ * account decides who may reach the shared workspace in the cloud; the local
+ * check decides who may open the copy already on this device. Sign-in tries
+ * Firebase first and falls back to the local check when it cannot — which is
+ * what keeps a blocked network, a project still being set up, or a plane from
+ * locking you out of your own data.
+ *
+ * BO_MEMBER holds who Firebase says you are once that has been established.
+ */
+let BO_MEMBER = null;   // { uid, email, personId, role } once signed in
+
+function boFireReady(){ return !!(window.BOFire && window.BOFire.ready); }
+
+/** Which Person this Firebase account acts as. Membership is granted out of
+ *  band — the rules make /members read-only — so an account that is not
+ *  listed is authenticated but has no workspace to enter. */
+async function boLookupMember(uid){
+  const f = window.BOFire;
+  const snap = await f.dbApi.get(f.dbApi.ref(f.db, 'members/' + uid));
+  return snap.exists() ? snap.val() : null;
+}
+
+/** Adopts a signed-in Firebase user as the app's session.
+ *  Returns an error string, or null when the session is open. */
+async function boAdoptFirebaseUser(user){
+  let member = null;
+  try{ member = await boLookupMember(user.uid); }
+  catch(e){ return 'Không đọc được quyền truy cập — kiểm tra Security Rules'; }
+  if(!member) return 'Tài khoản hợp lệ nhưng chưa được thêm vào workspace này';
+
+  // The member record names a Person; fall back to the owner if that Person
+  // is not in this device's copy yet, so a fresh device can still get in.
+  const person = (member.personId && empById(member.personId)) || STATE.employees[0] || null;
+  if(!person) return 'Workspace chưa có người dùng nào';
+
+  BO_MEMBER = { uid:user.uid, email:user.email, personId:person.id, role:member.role || 'member' };
+  SESSION_USER_ID = person.id;
+  STATE.currentUserId = person.id;
+  persist();
+  try{ sessionStorage.setItem('bachoffice.session', person.id); }catch(e){}
+  return null;
+}
+
+/** Firebase's own wording is for developers; these are for the person typing. */
+function boAuthMessage(code){
+  switch(code){
+    case 'auth/invalid-email':        return 'Địa chỉ email không hợp lệ';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':   return 'Sai email hoặc mật khẩu';
+    case 'auth/too-many-requests':    return 'Thử quá nhiều lần — đợi một lát rồi thử lại';
+    case 'auth/network-request-failed': return null;   // offline: fall back, do not shout
+    case 'auth/operation-not-allowed': return 'Chưa bật Email/Password trong Firebase Console';
+    default: return null;
+  }
+}
+
+/** Firebase first, this device second. Returns null on success. */
+async function boSignIn(identifier, password){
+  if(boFireReady() && String(identifier||'').includes('@')){
+    const f = window.BOFire;
+    try{
+      const cred = await f.authApi.signInWithEmailAndPassword(f.auth, identifier.trim(), password);
+      const err = await boAdoptFirebaseUser(cred.user);
+      if(err){ try{ await f.authApi.signOut(f.auth); }catch(_){}; return err; }
+      return null;
+    }catch(e){
+      const msg = boAuthMessage(e && e.code);
+      if(msg) return msg;                       // a real answer: stop here
+      // anything else (offline, blocked, misconfigured) falls through
+    }
+  }
+  if(attemptLogin(identifier, password)) return null;
+  return 'Sai tên đăng nhập hoặc mật khẩu';
+}
+
+/** Restores a Firebase session on load, so a refresh does not ask again.
+ *  Silent by design: a failure here just leaves the sign-in screen up. */
+function boWatchAuth(){
+  if(!boFireReady()) return;
+  const f = window.BOFire;
+  f.authApi.onAuthStateChanged(f.auth, async (user)=>{
+    if(!user){ BO_MEMBER = null; return; }
+    if(isLoggedIn() && BO_MEMBER) return;      // already settled
+    const err = await boAdoptFirebaseUser(user);
+    if(!err) renderApp();
+  });
+}
+
 let SESSION_USER_ID = null;
 let loginError = "";
 const AUTO_LOCK_OPTIONS = [[1,"1 phút"],[5,"5 phút"],[15,"15 phút"],[30,"30 phút"],[60,"1 tiếng"],[0,"Không bao giờ"]];
@@ -5314,6 +5411,9 @@ function attemptLogin(username, password){
 }
 function logout(reason){
   SESSION_USER_ID = null;
+  // Without this the auth listener would sign the next load straight back in.
+  if(BO_MEMBER && boFireReady()){ try{ window.BOFire.authApi.signOut(window.BOFire.auth); }catch(e){} }
+  BO_MEMBER = null;
   try{ sessionStorage.removeItem('bachoffice.session'); }catch(e){}
   stopIdleWatch();
   loginError = reason || "";
@@ -5681,10 +5781,11 @@ function viewLoginPanel(){
 function wireLogin(){
   const user = document.getElementById('login_user');
   const pass = document.getElementById('login_pass');
-  const go = ()=>{
-    if(attemptLogin(user.value, pass.value)){ loginError=""; renderApp(); toast('Xin chào, '+currentUser().name); }
+  const go = async ()=>{
+    const err = await boSignIn(user.value, pass.value);
+    if(!err){ loginError=""; renderApp(); toast('Xin chào, '+currentUser().name); }
     else {
-      loginError = "Sai tên đăng nhập hoặc mật khẩu"; renderApp();
+      loginError = err; renderApp();
       // renderApp() has rebuilt the screen and re-run wireLogin, which sized
       // the fresh field against its empty value. Putting the username back
       // afterwards therefore leaves it in a field zero characters wide — the
@@ -18802,6 +18903,9 @@ function wireGlobalShortcuts(){
     if(sid && empById(sid)){ SESSION_USER_ID = sid; STATE.currentUserId = sid; }
   }catch(e){}
   renderApp();
+  // The module may still be loading, so take whichever signal arrives.
+  if(boFireReady()) boWatchAuth();
+  else window.addEventListener('bofire-ready', ()=>{ try{ boWatchAuth(); }catch(e){ console.warn('auth', e); } }, {once:true});
   try{ wireGlobalShortcuts(); }catch(e){ console.warn('shortcuts', e); }
   // Ambient systems. Each guards itself, so a failure in one never stops boot.
   try{ startAlarmEngine(); renderAlarmDock(); }catch(e){ console.warn('alarms', e); }
