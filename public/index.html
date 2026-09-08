@@ -4049,6 +4049,19 @@ body:has(.m-root) .weather-layer{display:none !important;}
 /* The flick has to stay in the wheel. Without this the sheet scrolled
    instead and the column felt dead under the thumb. */
 .m-wheel{overscroll-behavior:contain; -webkit-overflow-scrolling:touch;}
+
+/* The hourly view is a grid with a layer over it, not a stack of boxes. Rows
+   have to be a fixed height for a block's top and height to mean anything, and
+   the layer starts where the hour labels end. */
+.m-hours{position:relative; display:flex; flex-direction:column;}
+.m-hours .m-hour{height:56px; min-height:56px; padding:0; align-items:flex-start;}
+.m-hours .m-hour-label{padding-top:6px;}
+.m-hour-layer{position:absolute; left:52px; right:0; top:0; bottom:0; pointer-events:none;}
+.m-hour-layer .m-block{pointer-events:auto; overflow:hidden; gap:1px;
+  padding:6px 9px; justify-content:flex-start;}
+/* A half-hour block is 24px tall; the second line simply will not fit, and a
+   clipped half-line reads worse than none. */
+.m-hour-layer .m-block .m-block-meta{white-space:nowrap; text-overflow:ellipsis; overflow:hidden;}
 </style>
 </head>
 <body>
@@ -4163,6 +4176,8 @@ let LANG = (function(){ try{ return localStorage.getItem('bachoffice.lang') || '
 function loc(){ return LANG==='en' ? 'en-US' : 'vi-VN'; }
 const DICT_EN = {
   /* ---- phone shell ---- */
+  "Đang diễn ra": "In progress now",
+  "Đã diễn ra": "Finished",
   "Không có sự kiện trong 7 ngày": "Nothing scheduled in the next 7 days",
   "Ghi nhớ đăng nhập — gõ yes": "Remember me — type yes",
   "Đã đồng bộ": "Synced",
@@ -10626,7 +10641,24 @@ function doneLast(list){
 }
 /** Days-left pill, shaded on the red scale — nearer deadline = deeper red. */
 function dueBadgeHtml(t){
-  if(!t.deadline || t.status==='Hoàn thành') return '';
+  if(t.status==='Hoàn thành') return '';
+  /* A span is dated by its start, so it has something to say even with no
+     deadline set; a plain task with no deadline still has nothing. */
+  if(!t.deadline && !(isSpanTask(t) && t.start)) return '';
+  /* A span never joins the red scale. isOverdue() has always known a meeting
+     cannot run late, but this badge did its own arithmetic and so stamped
+     "Quá hạn" on one that had simply finished. It says where the span is
+     relative to now instead, in its own colour. */
+  if(isSpanTask(t)){
+    const r = eventRange(t); if(!r) return '';
+    const now = new Date();
+    const c = isMeeting(t) ? 'var(--sky)' : 'var(--purple)';
+    const pill = (txt)=> `<span class="due-pill" style="background:${c};color:#fff;">${txt}</span>`;
+    if(now >= r.end) return pill('Đã diễn ra');
+    if(now >= r.start) return pill('Đang diễn ra');
+    const days = Math.ceil((r.start - now)/86400000);
+    return pill(days <= 0 ? 'Hôm nay' : 'Còn ' + days + ' ngày');
+  }
   const ms = new Date(t.deadline) - new Date();
   if(ms < 0){
     const days = Math.max(1, Math.ceil(Math.abs(ms)/86400000));
@@ -10650,10 +10682,15 @@ function taskProgressCellHtml(t){
 }
 /** Deadline date shown in its own cell (DD-MMM), next to the days-left pill. */
 function deadlineDateCellHtml(t){
-  if(!t.deadline) return `<span class="due-date muted">—</span>`;
+  /* A meeting is announced by when it begins, not when it lets out. On a task
+     the deadline is the moment that matters; on a span it is the far end, and
+     printing that told anyone who had to be there the wrong time. */
+  const span = isSpanTask(t) && t.start;
+  const when = span ? t.start : t.deadline;
+  if(!when) return `<span class="due-date muted">—</span>`;
   const overdue = isOverdue(t);
   const timed = hasExplicitTime(t);
-  return `<span class="due-date ${overdue?'overdue':''}" title="${fmtDateTimeFull(t.deadline)}">${icon('calendar',12)}${fmtDDMMM(t.deadline)}${timed?`<b class="due-time">${fmtHM(t.deadline)}</b>`:''}</span>`;
+  return `<span class="due-date ${overdue?'overdue':''}" title="${fmtDateTimeFull(when)}">${icon('calendar',12)}${fmtDDMMM(when)}${timed?`<b class="due-time">${fmtHM(when)}</b>`:''}</span>`;
 }
 function fmtHM(iso){ const d=new Date(iso); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 function fmtDateTimeFull(iso){ return new Date(iso).toLocaleString(loc(),{weekday:'short',day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
@@ -19656,19 +19693,13 @@ function mViewTimetable(){
      to reach yesterday-but-one or next month. */
   const first = mAddDays(mStartOfWeek(day), -28);
   const week = Array.from({length:84}, (_,i)=> mAddDays(first, i));
-  const START = 6, END = 22;
-  const items = [];
-  mTasks().forEach(t=>{
-    if(t.start && mSameDay(t.start, day)){
-      /* A span carries its own end. Reading estimateHours for one drew every
-         meeting as an hour long no matter what time it actually finished. */
-      const r = isSpanTask(t) ? eventRange(t) : null;
-      items.push({t, start:t.start, title:t.title, sub:false, est:t.estimateHours,
-                  end: r ? r.end : null});
-    }
-    (t.checklist||[]).forEach(c=>{ if(c.start && mSameDay(c.start, day)) items.push({t, start:c.start, title:c.text, sub:true, est:0.5}); });
-  });
-  items.sort((a,b)=> new Date(a.start) - new Date(b.start));
+  const START = TT_START_HOUR, END = TT_END_HOUR, ROW = 56;
+  /* The desktop already had all of this: tasksForDay() gathers the day's tasks
+     and its timed subtasks, clips a run that crosses midnight to the day being
+     drawn, and layoutTimetableLanes() packs whatever overlaps into side-by-side
+     lanes. Writing a second, simpler version here is what made a meeting until
+     five o'clock appear as a box in the nine o'clock row. */
+  const items = layoutTimetableLanes(tasksForDay(day), day);
 
   return `
   <div class="m-page" style="gap:12px;padding-top:8px">
@@ -19687,22 +19718,30 @@ function mViewTimetable(){
       <div style="font-size:13px;color:var(--text-2)"><span>${items.length} công việc</span> · <span>${esc(mLongDate(day))}</span></div>
       <div style="font-size:12.5px;color:var(--text-3)">Khung giờ ${mPad(START)}:00 – ${mPad(END)}:00</div>
     </div>
-    <div class="m-col m-pad">
-      ${Array.from({length:END-START}, (_,i)=>{
-        const h = START + i;
-        const blocks = items.filter(x=> new Date(x.start).getHours() === h);
-        return `<div class="m-hour">
-          <div class="m-hour-label m-num">${mPad(h)}:00</div>
-          <div class="m-hour-body">${blocks.map(x=>{
-            const p = mProject(x.t.projectId), c = mProjColor(p);
-            const end = x.end || new Date(+new Date(x.start) + Math.max(0.5, x.est||1)*3600000);
-            const who = empById(x.t.assigneeId);
-            return `<button type="button" class="m-block" style="background:${mTint(c,'22')};border-left-color:${c}" data-mtask="${x.t.id}">
-              <span class="m-block-title">${x.sub?'↳ ':''}${esc(x.title)}</span>
-              <span class="m-block-meta m-num">${mClock(x.start)} › ${mPad(end.getHours())}:${mPad(end.getMinutes())} · ${esc(p?p.name:(who?who.name:'Không thuộc dự án'))}</span>
-            </button>`;
-          }).join('')}</div></div>`;
-      }).join('')}
+    <div class="m-hours m-pad">
+      ${Array.from({length:END-START}, (_,i)=>
+        `<div class="m-hour"><div class="m-hour-label m-num">${mPad(START+i)}:00</div></div>`).join('')}
+      <div class="m-hour-layer">
+        ${items.map(it=>{
+          const t = it.t;
+          const p = mProject(t.projectId), c = mProjColor(p);
+          const who = empById(t.assigneeId);
+          /* The drawn segment is the truth for this day: a run that began
+             yesterday must say when it resumes here, not when it first began. */
+          const s = Math.max(START, it.startH), e = Math.min(END, it.endH);
+          const top = (s - START) * ROW;
+          const height = Math.max(0.5, e - s) * ROW - 4;
+          const w = 100 / (it.lanes || 1), left = (it.lane || 0) * w;
+          const hm = x => mPad(Math.floor(x)) + ':' + mPad(Math.round((x % 1) * 60));
+          return `<button type="button" class="m-block" data-mtask="${t.parentId || t.id}"
+            style="position:absolute; top:${top}px; height:${height}px;
+                   left:calc(${left}% + 2px); width:calc(${w}% - 4px);
+                   background:${mTint(c,'22')}; border-left-color:${c}">
+            <span class="m-block-title">${t.isSubtask?'↳ ':''}${esc(t.title)}</span>
+            <span class="m-block-meta m-num">${it.contFrom?'… ':''}${hm(it.startH)} › ${hm(it.endH)}${it.contTo?' …':''} · ${esc(p?p.name:(who?who.name:'Không thuộc dự án'))}</span>
+          </button>`;
+        }).join('')}
+      </div>
     </div>
   </div>`;
 }
