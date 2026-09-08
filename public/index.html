@@ -14259,6 +14259,40 @@ function tbActionVocabulary(){
  *  "hoàn thành Báo cáo Q4" and mean a real row, and one that invents a
  *  plausible id — which validateAIAction would refuse anyway, leaving the
  *  user with an answer that quietly does nothing. */
+/** The calendar the model has to reason inside.
+ *
+ *  "This week" is the single most common thing anyone asks about, and it was
+ *  the one thing the prompt never said. Given a pile of deadlines and the word
+ *  "today", a model has to do the calendar arithmetic itself — work out which
+ *  day of the week today is, count back to Monday, count forward to Sunday —
+ *  and it gets that wrong often enough to matter. So the boundaries are
+ *  computed here, once, by the same code the rest of the app uses, and handed
+ *  over as dates. Weeks start Monday, as they do everywhere else in Bach Office.
+ */
+function tbCalendarWindow(){
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dow = (today.getDay() + 6) % 7;              // 0 = Monday
+  const weekStart = new Date(today); weekStart.setDate(today.getDate() - dow);
+  const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 7);   // exclusive
+  const nextEnd = new Date(weekEnd);  nextEnd.setDate(weekEnd.getDate() + 7);
+  return { now, today, weekStart, weekEnd, nextEnd };
+}
+
+/** A date the model cannot misread: ISO, with the weekday spelled out, and the
+ *  clock only when the record actually carries one. fmtDate() is written for a
+ *  person looking at a screen — it says "Hôm nay 09:30" and drops the date
+ *  entirely, which is the one thing a model must not have to guess at. */
+const TB_DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+function tbStamp(v, withTime){
+  const d = (v instanceof Date) ? v : new Date(v);
+  if(isNaN(d)) return '?';
+  const p = n => String(n).padStart(2,'0');
+  const s = d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate())
+          + ' (' + TB_DOW[d.getDay()] + ')';
+  return withTime ? s + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) : s;
+}
+
 function tbBoardContext(){
   // The table headings go to the model, not to the screen, so they follow the
   // language the model is being instructed in. Vietnamese labels wrapped around
@@ -14266,33 +14300,117 @@ function tbBoardContext(){
   // language at random — which is half of what was going wrong.
   const en = tobbyLang() === 'en';
   const L = (vi, e)=> en ? e : vi;
-  const open = activeTasks()
-    .filter(t=> !t.archived && t.status !== 'Hoàn thành' && !isFrozen(t));
-  const overdue = open.filter(isOverdue).length;
-  const today = open.filter(t=> isSameDay(t.deadline) && !isOverdue(t)).length;
-  const fmt = (t)=> '  • id=' + t.id + ' | ' + String(t.title||'').slice(0,90)
-    + L(' | hạn: ', ' | due: ') + (t.deadline ? fmtDate(t.deadline) : L('không','none'))
-    + ' | ' + (t.status||'') + L(' | ưu tiên: ', ' | priority: ') + (t.priority||'');
-  const tasks = open.slice(0, 15).map(fmt).join('\n')
-    || L('  (không có việc nào đang mở)', '  (nothing open)');
-  const projects = (STATE.projects||[]).slice(0, 10)
-    .map(p=> '  • id=' + p.id + ' | ' + String(p.name||p.title||'').slice(0,80)).join('\n')
-    || L('  (chưa có dự án)', '  (no projects yet)');
+  const W = tbCalendarWindow();
+  const all = activeTasks().filter(t=> !t.archived);
+  const inWeek = (v)=>{ const d = new Date(v); return !isNaN(d) && d >= W.weekStart && d < W.weekEnd; };
+
+  /* Meetings and events are not to-dos and were never separated out. Both sat
+     in the same "OPEN TASKS" list, so "what should I do this week" listed the
+     meetings as work, and "how many meetings this week" had no way to count
+     them apart from anything else. They are a different kind of thing: a span
+     with two ends, somewhere to be rather than something to finish. */
+  const spans = all.filter(isSpanTask)
+    .filter(t=>{ const r = eventRange(t); return r && r.end >= W.weekStart && r.start < W.nextEnd; })
+    .sort((a,b)=> new Date(a.start||0) - new Date(b.start||0));
+  const jobs = all.filter(t=> !isSpanTask(t) && t.status !== 'Hoàn thành' && !isFrozen(t))
+    .sort((a,b)=> new Date(a.deadline || '2999') - new Date(b.deadline || '2999'));
+  const doneRecent = all.filter(t=> t.status === 'Hoàn thành' && t.completedAt
+      && (Date.now() - new Date(t.completedAt)) < 14*86400000)
+    .sort((a,b)=> new Date(b.completedAt) - new Date(a.completedAt));
+
+  const overdue  = jobs.filter(isOverdue);
+  const dueToday = jobs.filter(t=> isSameDay(t.deadline) && !isOverdue(t));
+  const dueWeek  = jobs.filter(t=> t.deadline && inWeek(t.deadline));
+  const mtgWeek  = spans.filter(t=> isMeeting(t) && inWeek(t.start));
+  const evtWeek  = spans.filter(t=> isEvent(t)   && inWeek(t.start));
+  const doneWeek = doneRecent.filter(t=> inWeek(t.completedAt));
+
+  const proj = (t)=>{ const p = projectById(t.projectId); return p ? (p.name || p.title || '') : ''; };
+  const tail = (t)=> (proj(t) ? L(' | dự án: ', ' | project: ') + proj(t) : '');
+
+  const fmtSpan = (t)=>{
+    const r = eventRange(t);
+    const kind = isMeeting(t) ? 'Meeting' : L('Sự kiện','Event');
+    const sameDay = r && r.start.toDateString() === r.end.toDateString();
+    const when = r ? tbStamp(r.start, true) + ' → ' + (sameDay ? tbStamp(r.end,true).split(') ')[1] : tbStamp(r.end, true))
+                   : L('chưa đặt giờ','no time set');
+    return '  • id=' + t.id + ' | ' + kind + ' | ' + String(t.title||'').slice(0,90) + ' | ' + when + tail(t);
+  };
+  const fmtJob = (t)=> '  • id=' + t.id + ' | ' + String(t.title||'').slice(0,90)
+    + L(' | hạn: ', ' | due: ') + (t.deadline ? tbStamp(t.deadline, hasExplicitTime(t)) : L('không có','none'))
+    + (isOverdue(t) ? L(' [QUÁ HẠN]',' [OVERDUE]') : '')
+    + ' | ' + (t.status||'') + L(' | ưu tiên: ', ' | priority: ') + (t.priority||'')
+    + ' | ' + Math.round(computeCompletion(t)) + '%' + tail(t);
+  const fmtDone = (t)=> '  • id=' + t.id + ' | ' + String(t.title||'').slice(0,90)
+    + L(' | xong ', ' | finished ') + tbStamp(t.completedAt) + tail(t);
+  const or = (rows, empty)=> rows.length ? rows.join('\n') : '  (' + empty + ')';
+
+  const projects = or((STATE.projects||[]).slice(0, 12)
+    .map(p=> '  • id=' + p.id + ' | ' + String(p.name||p.title||'').slice(0,80)),
+    L('chưa có dự án','no projects yet'));
   // Titles only. A note's body is the user's own writing and has no business
   // leaving the browser to answer "which note did you mean".
-  const notes = (STATE.notes||[]).filter(n=> !n.deletedAt && !n.archived)
-    .slice(0, 10).map(n=> '  • id=' + n.id + ' | ' + String(n.title||L('(không tên)','(untitled)')).slice(0,80)).join('\n')
-    || L('  (chưa có ghi chú)', '  (no notes yet)');
+  const notes = or((STATE.notes||[]).filter(n=> !n.deletedAt && !n.archived).slice(0, 12)
+    .map(n=> '  • id=' + n.id + ' | ' + String(n.title||L('(không tên)','(untitled)')).slice(0,80)),
+    L('chưa có ghi chú','no notes yet'));
+
   return [
     L('BẢNG CÔNG VIỆC HIỆN TẠI (dữ liệu thật, dùng đúng id này):',
       'THE BOARD RIGHT NOW (real data — use exactly these ids):'),
-    L('Hôm nay là ', 'Today is ') + fmtDate(nowISO())
-      + L('. Đang mở ' + open.length + ' việc, ' + overdue + ' quá hạn, ' + today + ' đến hạn hôm nay.',
-          '. ' + open.length + ' open, ' + overdue + ' overdue, ' + today + ' due today.'),
-    L('NHIỆM VỤ ĐANG MỞ:', 'OPEN TASKS:'), tasks,
+    '',
+    L('LỊCH:','THE CALENDAR:'),
+    L('  Bây giờ: ', '  Right now: ') + tbStamp(W.now, true),
+    L('  TUẦN NÀY = ', '  THIS WEEK = ') + tbStamp(W.weekStart) + ' → '
+      + tbStamp(new Date(+W.weekEnd - 86400000))
+      + L('  (tuần bắt đầu từ thứ Hai)', '  (weeks start on Monday)'),
+    L('  Tuần sau  = ', '  Next week = ') + tbStamp(W.weekEnd) + ' → '
+      + tbStamp(new Date(+W.nextEnd - 86400000)),
+    '',
+    L('SỐ LIỆU ĐÃ ĐẾM SẴN (dùng đúng những số này, đừng tự đếm lại):',
+      'COUNTS, ALREADY DONE FOR YOU (use these numbers, do not recount):'),
+    L('  Việc chưa xong: ', '  Unfinished tasks: ') + jobs.length
+      + L(' · quá hạn: ',' · overdue: ') + overdue.length
+      + L(' · đến hạn hôm nay: ',' · due today: ') + dueToday.length
+      + L(' · đến hạn trong tuần này: ',' · due this week: ') + dueWeek.length,
+    L('  Trong TUẦN NÀY: ','  THIS WEEK: ') + mtgWeek.length + L(' cuộc họp (Meeting), ',' meetings, ')
+      + evtWeek.length + L(' sự kiện, ',' events, ') + doneWeek.length + L(' việc đã hoàn thành.',' tasks finished.'),
+    '',
+    L('HỌP & SỰ KIỆN (mục lịch — có giờ bắt đầu và giờ kết thúc; KHÔNG phải việc cần làm), tuần này và tuần sau:',
+      'MEETINGS & EVENTS (calendar entries — they have a start and an end; they are NOT to-dos), this week and next:'),
+    or(spans.slice(0, 25).map(fmtSpan), L('không có cuộc họp hay sự kiện nào','none')),
+    '',
+    L('VIỆC CẦN LÀM (chưa hoàn thành, sắp theo hạn gần nhất):',
+      'TASKS TO DO (unfinished, nearest deadline first):'),
+    or(jobs.slice(0, 40).map(fmtJob), L('không còn việc nào đang mở','nothing open')),
+    '',
+    L('VIỆC ĐÃ HOÀN THÀNH (14 ngày gần đây):','FINISHED RECENTLY (last 14 days):'),
+    or(doneRecent.slice(0, 25).map(fmtDone), L('chưa hoàn thành việc nào gần đây','nothing finished recently')),
+    '',
     L('DỰ ÁN:', 'PROJECTS:'), projects,
     L('GHI CHÚ (chỉ tiêu đề):', 'NOTES (titles only):'), notes,
+    '',
+    L('VỀ CHÍNH BẠN (khi người dùng hỏi Tobby lớn tới đâu rồi):',
+      'ABOUT YOURSELF (for when the user asks how grown you are):'),
+    tbSelfContext(L),
   ].join('\n');
+}
+
+/** Tobby's own numbers. He used to answer this one from a canned branch, which
+ *  worked only because a regular expression happened to spot the word "tobby";
+ *  now that the model reads the question, it needs the figures too — otherwise
+ *  the one thing it cannot look up is himself. */
+function tbSelfContext(L){
+  try{
+    const g = TobbyGrowth.progress();
+    const b = tobbyBondLevel();
+    return '  ' + L('Giai đoạn: ','Stage: ') + (L(g.cur.vi, g.cur.en))
+      + ' · ' + (tobby().xp || 0) + ' XP'
+      + (g.next ? L(' · còn ' + g.xpLeft + ' XP nữa lên ' + g.next.vi,
+                    ' · ' + g.xpLeft + ' XP to ' + g.next.en)
+                : L(' · đã trưởng thành', ' · fully grown'))
+      + L(' · thân thiết: ', ' · bond: ') + L(b.vi, b.en)
+      + L(' · quen nhau ', ' · together for ') + TobbyGrowth.ageDays() + L(' ngày',' days');
+  }catch(e){ return '  ' + L('(chưa có dữ liệu)','(no data)'); }
 }
 
 function tobbyAiSystemPrompt(){
@@ -14331,6 +14449,20 @@ function tbAiPromptVi(){
     '  bình thường theo hiểu biết của bạn. Nếu câu hỏi cần dữ liệu cập nhật',
     '  theo thời gian thực (giá cả, tin tức, thời tiết...), nói rõ là không có',
     '  dữ liệu sống, đừng bịa số cụ thể.',
+    '',
+    'CÁCH TRẢ LỜI CÂU HỎI VỀ DỮ LIỆU TRONG APP — đọc kỹ:',
+    '- Trước khi trả lời, hãy hiểu người dùng đang hỏi gì: hỏi về LOẠI bản ghi nào',
+    '  (việc cần làm / cuộc họp / sự kiện / ghi chú / dự án), trong KHOẢNG THỜI GIAN',
+    '  nào, và muốn một CON SỐ, một DANH SÁCH hay MỘT việc duy nhất.',
+    '- “Tuần này” là đúng khoảng ngày ghi trong mục LỊCH bên dưới — không phải',
+    '  “7 ngày vừa qua”, cũng không phải “7 ngày tới”.',
+    '- Hỏi về HỌP hay SỰ KIỆN thì chỉ nhìn mục HỌP & SỰ KIỆN. Hỏi “cần LÀM gì”',
+    '  thì chỉ nhìn mục VIỆC CẦN LÀM — một cuộc họp là nơi phải có mặt, không',
+    '  phải việc phải hoàn thành.',
+    '- Hỏi việc SẮP TỚI thì không được trả lời bằng việc ĐÃ XONG, và ngược lại.',
+    '- Trả lời đúng câu được hỏi. Nếu câu trả lời là 0 thì nói thẳng là không có.',
+    '- Nếu câu hỏi mơ hồ, chọn cách hiểu hợp lý nhất rồi nói rõ mình đang hiểu',
+    '  theo nghĩa đó — đừng hỏi lại chỉ vì câu hỏi ngắn.',
     '',
     'GỢI Ý THÊM VÀO LỊCH:',
     '- Khi người dùng hỏi về một ngày lễ/sự kiện cụ thể có thể đặt lịch (Noel,',
@@ -14374,6 +14506,22 @@ function tbAiPromptEn(){
     '  normally from what you know. If the question needs live data (prices,',
     '  news, weather…), say plainly that you have none rather than inventing a',
     '  specific number.',
+    '',
+    'HOW TO ANSWER A QUESTION ABOUT THE BOARD — read this carefully:',
+    '- Work out what is actually being asked before you answer: which KIND of',
+    '  record (task / meeting / event / note / project), which TIME WINDOW, and',
+    '  whether the answer is a COUNT, a LIST, or a SINGLE item.',
+    '- "This week" means exactly the dates given under THE CALENDAR below — not',
+    '  "the last 7 days", and not "the next 7 days".',
+    '- A question about MEETINGS or EVENTS is answered from the MEETINGS & EVENTS',
+    '  section only. A question about what to DO is answered from TASKS TO DO',
+    '  only — a meeting is somewhere to be, not something to finish.',
+    '- Never answer a question about what is COMING UP with what has been DONE,',
+    '  or the other way round.',
+    '- Answer the question that was asked. If the answer is zero, say zero.',
+    '- If the question is ambiguous, take the most reasonable reading and say',
+    '  which one you took — do not ask a clarifying question just because the',
+    '  question was short.',
     '',
     'SUGGESTING A CALENDAR ENTRY:',
     '- When the user asks about a datable holiday or event (Christmas, New Year,',
@@ -14457,11 +14605,15 @@ function tbChatHistory(log){
  * has suggested something the allowlist accepts.
  */
 async function tobbyAskAI(text, history){
-  const fallback = { text: TB_SAY(
+  /* `failed` marks every path that is not an answer from the model. It matters
+     because none of these throw — they return text — and without the flag the
+     caller cannot tell "Gemini is not configured." from a real reply, and would
+     show it in place of an answer the board could have given for free. */
+  const fallback = { failed:true, text: TB_SAY(
     'Mình trả lời được về: việc nên làm, việc gấp, việc quá hạn, việc đã xong, tuần này, việc nặng nhất.',
     'I can answer: what to do next, what is urgent, what is overdue, what is done, this week, the heaviest task.') };
   if(!aiEnabled()) return fallback;
-  if(!tbAiHasBudget()) return { text: TB_SAY(
+  if(!tbAiHasBudget()) return { failed:true, text: TB_SAY(
     'Hôm nay hỏi nhiều rồi, mai hỏi tiếp Tobby nhé 😅',
     'That is a lot of questions for one day — ask me again tomorrow 😅') };
   try{
@@ -14483,7 +14635,7 @@ async function tobbyAskAI(text, history){
     }
     return res;
   }catch(e){
-    return { text: geminiService.handleError(e) };
+    return { failed:true, text: geminiService.handleError(e) };
   }
 }
 
@@ -16862,21 +17014,49 @@ function tobbyAsk(text){
     };
   }
   const q = String(text||'').toLowerCase();
-  const hit =
-    /quá hạn|trễ|nợ|overdue|late/.test(q)          ? 'overdue' :
-    /gấp|urgent|khẩn|hôm nay hạn|due/.test(q)       ? 'urgent'  :
-    /xong|hoàn thành|done|finish/.test(q)          ? 'today'   :
-    /tuần|week/.test(q)                             ? 'week'    :
-    /nặng|lâu|heavy|big/.test(q)                    ? 'heavy'   :
-    /tobby|lớn|tuổi|age|grow/.test(q)               ? 'tobby'   :
-    /làm gì|next|bắt đầu|start/.test(q)            ? 'next'    : null;
-  // Nothing matched. `fallback` marks it so the caller knows this is the point
-  // where a real model is worth asking — the static line stays as the answer
-  // if there is no model, no budget, or no network.
-  if(!hit) return { fallback:true, text: TB_SAY(
+  const hit = tbGuessCanned(q);
+  const canned = hit ? tobbyAnswer(hit) : null;
+
+  /* Reading a question is the model's job, not a regular expression's.
+     The ladder above can only spot a WORD, and a word is not a question:
+
+       "what should be done in this week"  → the word "done" → what you FINISHED
+       "tuần này cần làm gì"               → the word "tuần" → what you finished
+                                                                in the last 7 days
+       "how many meetings this week"       → the word "week" → the same paragraph
+
+     Three different questions, one answer, and none of them the right one. So
+     when there is a model to ask, it is asked, and the guess rides along only
+     as the fallback for a call that fails or a browser with no network.
+
+     The quick-question chips are untouched: those ARE the canned questions,
+     picked by name from a list, with nothing left to infer — and they stay
+     instant and free. */
+  if(aiEnabled() && tbAiHasBudget()){
+    return Object.assign({}, canned || {}, {
+      fallback:true, canned: !!canned,
+      text: (canned && canned.text) || TB_SAY(
+        'Để mình xem lại bảng công việc đã…', 'Let me look at the board…') });
+  }
+  // No model, or the day's budget is gone: the guess is the best there is, and
+  // a rough answer from the real board beats no answer at all.
+  if(canned) return canned;
+  return { text: TB_SAY(
     'Mình trả lời được về: việc nên làm, việc gấp, việc quá hạn, việc đã xong, tuần này, việc nặng nhất.',
     'I can answer: what to do next, what is urgent, what is overdue, what is done, this week, the heaviest task.') };
-  return tobbyAnswer(hit);
+}
+
+/** A cheap guess at which canned answer fits, by keyword. It was the front door
+ *  and is now the back-up: see the note in tobbyAsk() for why it could never be
+ *  more than a guess. */
+function tbGuessCanned(q){
+  return /quá hạn|trễ|nợ|overdue|late/.test(q)          ? 'overdue' :
+         /gấp|urgent|khẩn|hôm nay hạn|due/.test(q)       ? 'urgent'  :
+         /xong|hoàn thành|done|finish/.test(q)          ? 'today'   :
+         /tuần|week/.test(q)                             ? 'week'    :
+         /nặng|lâu|heavy|big/.test(q)                    ? 'heavy'   :
+         /tobby|lớn|tuổi|age|grow/.test(q)               ? 'tobby'   :
+         /làm gì|next|bắt đầu|start/.test(q)            ? 'next'    : null;
 }
 
 /* =========================================================
@@ -17619,7 +17799,14 @@ function tobbyPanel(opt){
       say({ text: TB_L('Tobby đang nghĩ…','Tobby is thinking…'), thinking:true });
       const history = tbChatHistory(chatLog);
       tobbyAskAI(q, history)
-        .then(res=>{ tobbyTypingTail(); replaceLastTurn(Object.assign({ role:'tobby' }, res)); })
+        .then(res=>{
+          tobbyTypingTail();
+          // The model did not answer — no key, no network, no budget left. If
+          // the keyword ladder had a guess, the board's own answer is a better
+          // thing to show than the reason Gemini could not be reached.
+          if(res.failed && r.canned) res = r;
+          replaceLastTurn(Object.assign({ role:'tobby' }, res));
+        })
         .catch(()=>{ tobbyTypingTail(); replaceLastTurn(Object.assign({ role:'tobby' }, r)); });
     };
     overlay.querySelectorAll('[data-task-open]').forEach(b=> b.onclick = (e)=>{
