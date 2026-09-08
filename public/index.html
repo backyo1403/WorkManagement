@@ -4062,6 +4062,26 @@ body:has(.m-root) .weather-layer{display:none !important;}
 /* A half-hour block is 24px tall; the second line simply will not fit, and a
    clipped half-line reads worse than none. */
 .m-hour-layer .m-block .m-block-meta{white-space:nowrap; text-overflow:ellipsis; overflow:hidden;}
+
+/* Alt+G, while it waits for its second key. Bottom centre rather than beside
+   the sidebar: the chord is about where you are going, and the sidebar is the
+   thing it is going to move. */
+.kbd-chord{position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
+  z-index:1200; display:flex; align-items:center; gap:14px; max-width:calc(100vw - 32px);
+  padding:9px 15px; border-radius:13px; overflow-x:auto;
+  background:var(--surface); border:1px solid var(--border); box-shadow:var(--shadow);
+  font-size:12.5px; color:var(--text-2); pointer-events:none;
+  animation:kbdChordIn .13s ease-out;}
+.kbd-chord b{color:var(--text); font-weight:700; white-space:nowrap;}
+.kbd-chord span{display:flex; align-items:center; gap:6px; white-space:nowrap;}
+.kbd-chord kbd{display:inline-block; min-width:19px; text-align:center;
+  padding:2px 5px; border-radius:6px; font:inherit; font-weight:700; font-size:11.5px;
+  color:var(--text); background:var(--surface-2); border:1px solid var(--border-strong);
+  box-shadow:0 1px 0 var(--border-strong);}
+@keyframes kbdChordIn{from{opacity:0; transform:translate(-50%, 7px);}
+  to{opacity:1; transform:translate(-50%, 0);}}
+/* The phone shell has no keyboard and a tab bar exactly here. */
+@media (max-width:699px){ .kbd-chord{display:none;} }
 </style>
 </head>
 <body>
@@ -19417,22 +19437,75 @@ function wireTobbyInteraction(){
 /* =========================================================
    GLOBAL SHORTCUTS
    ---------------------------------------------------------
-   Two keys, wired once at boot rather than per render: render() rebuilds the
-   whole shell, and a listener hung inside it would be added again on every
+   Wired once at boot rather than per render: render() rebuilds the whole
+   shell, and a listener hung inside it would be added again on every
    navigation.
 
-   Both are ignored while the login screen is up — there is nothing to open
-   behind it — and while the caret is in a field, so Ctrl+P in the middle of
-   typing a task description does not pull a chat window over the top of it.
+   All of them are ignored while the login screen is up — there is nothing to
+   open behind it — and while the caret is in a field, so Ctrl+P in the middle
+   of typing a task description does not pull a chat window over the top of it.
 
-   A note on Ctrl+T. The browser reserves it for a new tab and does not offer
-   it to the page: on a normal Chrome or Firefox window the tab opens and this
-   is never called. It works where the browser has no tab bar to defend —
-   an installed PWA, or a kiosk window — so it is wired for those, and Alt+T
-   is wired alongside it as the binding that works in an ordinary tab. Ctrl+P
-   has no such problem: print IS offered to the page, and preventDefault takes
-   it cleanly.
+     Ctrl+P            Tobby (a toggle)
+     Ctrl+N   Alt+N    new task
+     Ctrl+⇧+N Alt+⇧+N  new note
+     Alt+T             new task, kept from before Ctrl+N existed
+     Alt+G then D/K/C/T/N   go to Dashboard / Kanban / Calendar / Tasks / Notes
+
+   WHY EVERY Ctrl BINDING HAS AN Alt TWIN. The browser keeps Ctrl+N (new
+   window), Ctrl+Shift+N (incognito) and Ctrl+T (new tab) for itself and never
+   offers them to the page — preventDefault cannot reach a keystroke the page is
+   not given. They fire only where there is no browser chrome to defend them: an
+   installed PWA, or a kiosk window. So they are wired for those, and an Alt
+   binding sits beside each one as the thing that actually works in an ordinary
+   tab. Ctrl+P is the exception: print IS offered to the page, and
+   preventDefault takes it cleanly.
+
+   The Alt keys are matched on e.code, not e.key. On macOS Alt is the compose
+   key — Alt+N reports "˜" and Alt+T reports "†" — and the physical key is the
+   only stable thing to test.
    ========================================================= */
+
+/** Where Alt+G can take you: second key → view. The labels come from
+ *  NAV_GROUPS rather than being written out again, so the hint strip and the
+ *  sidebar can never disagree about what a view is called. */
+const GOTO_CHORD = [['d','dashboard'], ['k','kanban'], ['c','calendar'],
+                    ['t','tasks'], ['n','notes']];
+const GOTO_CHORD_MS = 3000;      // long enough to think, short enough to forget
+let gotoChordArmed = false, gotoChordTimer = 0;
+
+function navLabel(id){
+  for(const g of NAV_GROUPS) for(const it of g.items) if(it.id === id) return it.label;
+  return id;
+}
+
+/** The strip along the bottom while the chord waits for its second key. A
+ *  chord that arms with no sign it has armed is indistinguishable from a
+ *  shortcut that did nothing at all. */
+function gotoChordHint(show){
+  let el = document.getElementById('kbdChord');
+  if(!show){ if(el) el.remove(); return; }
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'kbdChord';
+    el.className = 'kbd-chord';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = '<b>Đi tới</b>' + GOTO_CHORD.map(([k, id])=>
+    '<span><kbd>' + k.toUpperCase() + '</kbd>' + esc(navLabel(id)) + '</span>').join('');
+  try{ applyLang(el); }catch(err){}
+}
+function armGotoChord(){
+  clearTimeout(gotoChordTimer);
+  gotoChordArmed = true;
+  gotoChordHint(true);
+  gotoChordTimer = setTimeout(disarmGotoChord, GOTO_CHORD_MS);
+}
+function disarmGotoChord(){
+  clearTimeout(gotoChordTimer);
+  gotoChordArmed = false;
+  gotoChordHint(false);
+}
+
 function wireGlobalShortcuts(){
   /** True while the keystroke belongs to something the user is typing into. */
   const typing = (el)=>{
@@ -19441,17 +19514,51 @@ function wireGlobalShortcuts(){
     const tag = el.tagName;
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
   };
+  const goTo = (id)=>{ if(VIEW !== id){ VIEW = id; render(); } };
+  const newNote = ()=>{ try{ createNoteFromTemplate('blank'); }catch(err){ console.warn('new note', err); } };
+
+  /** Is this keystroke that letter? Both halves are needed and neither is
+   *  enough on its own: e.key alone misreads macOS, where Alt is the compose
+   *  key and Alt+N arrives as "˜"; e.code alone misses every event that
+   *  carries no physical key at all — some IMEs, remote desktops, and anything
+   *  another script dispatched by hand. */
+  const isLetter = (e, letter)=>
+    e.code === 'Key' + letter.toUpperCase() || (e.key || '').toLowerCase() === letter;
 
   document.addEventListener('keydown', (e)=>{
-    if(e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 't' || e.key === 'T')){
+    const k = (e.key || '').toLowerCase();
+
+    /* The armed chord gets first refusal on everything. Holding Alt down for
+       the second key is allowed but not required — "Alt+G then D" and
+       "Alt+G then Alt+D" are the same intention — which is why the letter is
+       matched on e.code as well as e.key. */
+    if(gotoChordArmed){
+      // A bare modifier is the user still on their way to the second key, not
+      // a second key. Letting go of Alt must not count as giving up.
+      if(k === 'alt' || k === 'shift' || k === 'control' || k === 'meta') return;
+      disarmGotoChord();
+      const hit = GOTO_CHORD.find(r=> isLetter(e, r[0]));
+      e.preventDefault();
+      if(hit) goTo(hit[1]);
+      return;                       // anything else simply cancels the chord
+    }
+
+    if(e.altKey && !e.ctrlKey && !e.metaKey){
+      const g = isLetter(e,'g'), t = isLetter(e,'t'), n = isLetter(e,'n');
+      if(!g && !t && !n) return;
       if(!isLoggedIn() || typing(e.target)) return;
       e.preventDefault();
-      openTaskModal(null);
+      if(g) armGotoChord();
+      else if(n && e.shiftKey) newNote();
+      else openTaskModal(null);     // Alt+T, and Alt+N
       return;
     }
-    if(!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
-    const k = (e.key || '').toLowerCase();
-    if(k !== 'p' && k !== 't') return;
+
+    if(!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    // Shift belongs to exactly one binding. Without this, Ctrl+Shift+P — the
+    // devtools console — would open Tobby on top of it.
+    if(e.shiftKey && k !== 'n') return;
+    if(k !== 'p' && k !== 'n' && k !== 't') return;
     if(!isLoggedIn()) return;
 
     // Closing is checked before the typing guard, and deliberately: the panel
@@ -19469,9 +19576,11 @@ function wireGlobalShortcuts(){
     if(k === 'p'){
       // Esc and click-outside come from tobbyPopup and need nothing here.
       try{ tobbyPanel({ centred:true }); }catch(err){ console.warn('tobby panel', err); }
+    } else if(e.shiftKey){
+      newNote();                    // Ctrl+Shift+N
     } else {
-      openTaskModal(null);
-    }
+      openTaskModal(null);          // Ctrl+N, and Ctrl+T for anyone with it in
+    }                               // their fingers — it costs nothing to keep
   });
 }
 
